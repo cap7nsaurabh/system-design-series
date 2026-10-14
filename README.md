@@ -119,9 +119,33 @@ flowchart TD
 * [01 LLD Approaches and Architectures](./LLD/01-lld-approaches-and-architectures.md) — OOAD, Clean Architecture, Hexagonal/Ports & Adapters, DDD, and UML modeling
 * [02 SOLID Principles Deep Dive](./LLD/02-solid-principles.md) — SRP, OCP, LSP, ISP, DIP with side-by-side BAD vs GOOD Java code refactorings
 * [03 Concurrency & Thread Safety in Java](./LLD/03-thread-safety-and-concurrency.md) — JMM, `volatile`, `synchronized` lock inflation, Explicit Locks, CAS, and Thread Pools
-* [04 Creational Design Patterns](./LLD/04-creational-design-patterns.md) — Singleton (DCL/Enum), Factory Method, Abstract Factory, Builder, Prototype, Object Pool
-* [05 Structural Design Patterns](./LLD/05-structural-design-patterns.md) — Adapter, Bridge, Composite, Decorator, Facade, Flyweight, Proxy (Dynamic Proxy & AOP)
-* [06 Behavioral Design Patterns](./LLD/06-behavioral-design-patterns.md) — Chain of Responsibility, Command, Interpreter, Iterator, Mediator, Memento, Observer, State, Strategy, Template Method, Visitor
+* [04 Creational Design Patterns](./LLD/04-creational-design-patterns.md) — Master category index and architecture guide
+  * [04-01: Singleton Pattern](./LLD/04-01-singleton-pattern.md) — DCL, volatile, Bill Pugh, Enum Singleton, reflection/serialization defenses
+  * [04-02: Factory Method Pattern](./LLD/04-02-factory-method-pattern.md) — Polymorphic instantiation and Open/Closed compliance
+  * [04-03: Abstract Factory Pattern](./LLD/04-03-abstract-factory-pattern.md) — Families of related cross-cloud infrastructure products
+  * [04-04: Builder Pattern](./LLD/04-04-builder-pattern.md) — Step-by-step object construction, immutability, and validation
+  * [04-05: Prototype Pattern](./LLD/04-05-prototype-pattern.md) — Deep vs shallow cloning and prototype registries
+  * [04-06: Object Pool Pattern](./LLD/04-06-object-pool-pattern.md) — Generic thread-safe object pool with BlockingQueue
+* [05 Structural Design Patterns](./LLD/05-structural-design-patterns.md) — Master category index and architecture guide
+  * [05-01: Adapter Pattern](./LLD/05-01-adapter-pattern.md) — Object vs Class adapters, XML-to-JSON legacy integration
+  * [05-02: Bridge Pattern](./LLD/05-02-bridge-pattern.md) — Decoupling abstraction from implementation to mitigate class explosion
+  * [05-03: Composite Pattern](./LLD/05-03-composite-pattern.md) — Hierarchical tree structures (file systems, organizational units)
+  * [05-04: Decorator Pattern](./LLD/05-04-decorator-pattern.md) — Dynamic behavioral wrapping without subclass explosion
+  * [05-05: Facade Pattern](./LLD/05-05-facade-pattern.md) — High-level simplified interfaces for complex multi-subsystem workflows
+  * [05-06: Flyweight Pattern](./LLD/05-06-flyweight-pattern.md) — Memory footprint reduction via intrinsic vs extrinsic state sharing
+  * [05-07: Proxy Pattern](./LLD/05-07-proxy-pattern.md) — Virtual, Protection, Dynamic Proxy (`java.lang.reflect.Proxy`), and AOP
+* [06 Behavioral Design Patterns](./LLD/06-behavioral-design-patterns.md) — Master category index and architecture guide
+  * [06-01: Chain of Responsibility Pattern](./LLD/06-01-chain-of-responsibility-pattern.md) — Sequential request handler pipelines and short-circuiting
+  * [06-02: Command Pattern](./LLD/06-02-command-pattern.md) — Encapsulated requests, undo/redo history stacks, and queue executors
+  * [06-03: Interpreter Pattern](./LLD/06-03-interpreter-pattern.md) — Grammar AST parsing, boolean expression engines, and SQL WHERE filters
+  * [06-04: Iterator Pattern](./LLD/06-04-iterator-pattern.md) — Fail-fast vs fail-safe aggregate traversal algorithms
+  * [06-05: Mediator Pattern](./LLD/06-05-mediator-pattern.md) — Decoupled colleague communication hubs (Air Traffic Control, Chatrooms)
+  * [06-06: Memento Pattern](./LLD/06-06-memento-pattern.md) — Snapshot state capture, rollback caretakers, and encapsulation preservation
+  * [06-07: Observer Pattern](./LLD/06-07-observer-pattern.md) — Thread-safe event pub-sub, CopyOnWriteArrayList, and Reactive Streams
+  * [06-08: State Pattern](./LLD/06-08-state-pattern.md) — Finite state machines, state-dependent behavior, and lifecycle transitions
+  * [06-09: Strategy Pattern](./LLD/06-09-strategy-pattern.md) — Interchangeable algorithms and runtime policy selection
+  * [06-10: Template Method Pattern](./LLD/06-10-template-method-pattern.md) — Invariant algorithm skeletons with subclass hook points
+  * [06-11: Visitor Pattern](./LLD/06-11-visitor-pattern.md) — Double-dispatch operations over heterogeneous object hierarchies
 * [07 Problem: Multi-Floor Parking Lot](./LLD/07-problem-parking-lot.md) — Multi-floor parking, vehicle hierarchy, spot allocation strategies, and per-floor lock striping
 * [08 Problem: Multi-Car Elevator System](./LLD/08-problem-elevator-system.md) — Multi-car elevator dispatcher, LOOK/SCAN algorithm, state machine, and condition signaling
 * [09 Problem: High-Performance Rate Limiter](./LLD/09-problem-rate-limiter.md) — Lock-free Token Bucket, Leaky Bucket, Sliding Window Counter, and multi-tenant manager
