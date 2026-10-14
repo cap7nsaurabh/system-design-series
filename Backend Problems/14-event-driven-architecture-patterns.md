@@ -1498,9 +1498,9 @@ When presented with an event-driven systems question in a Senior, Staff, or Prin
 
 ## 7. Related Chapters & Deep Dives
 
-* [01 Concurrency Control & Resource Booking](file:///e:/project/system-design-series/Backend%20Problems/01-concurrency-resource-booking.md) - Deep dive into lost updates, pessimistic locking (`FOR UPDATE`), and distributed locks.
-* [05 Distributed Transactions & Consistencies](file:///e:/project/system-design-series/Backend%20Problems/05-distributed-transactions-sagas.md) - Formal analysis of 2PC, 3PC, Saga isolation anomalies, and distributed consensus.
-* [07 FinTech & Banking Systems](file:///e:/project/system-design-series/Backend%20Problems/07-fintech-and-banking-systems.md) - Double-entry bookkeeping, immutable ledgers, and zero-loss financial reconciliation.
-* [12 Search & Indexing Systems](file:///e:/project/system-design-series/Backend%20Problems/12-search-and-indexing-systems.md) - Building real-time inverted search indexes using CDC and Kafka pipelines.
-* [13 Rate Limiting & Throttling at Scale](file:///e:/project/system-design-series/Backend%20Problems/13-rate-limiting-and-throttling.md) - Protecting event-driven ingest gateways against traffic spikes.
-* [16 Database Sharding Strategies](file:///e:/project/system-design-series/Backend%20Problems/16-database-sharding-strategies.md) - Horizontal partitioning, consistent hashing, and outbox scaling across shards.
+* [01 Concurrency Control & Resource Booking](./01-concurrency-resource-booking.md) - Deep dive into lost updates, pessimistic locking (`FOR UPDATE`), and distributed locks.
+* [05 Distributed Transactions & Consistencies](./05-distributed-transactions-sagas.md) - Formal analysis of 2PC, 3PC, Saga isolation anomalies, and distributed consensus.
+* [07 FinTech & Banking Systems](./07-fintech-and-banking-systems.md) - Double-entry bookkeeping, immutable ledgers, and zero-loss financial reconciliation.
+* [12 Search & Indexing Systems](./12-search-and-indexing-systems.md) - Building real-time inverted search indexes using CDC and Kafka pipelines.
+* [13 Rate Limiting & Throttling at Scale](./13-rate-limiting-and-throttling.md) - Protecting event-driven ingest gateways against traffic spikes.
+* [16 Database Sharding Strategies](./16-database-sharding-strategies.md) - Horizontal partitioning, consistent hashing, and outbox scaling across shards.

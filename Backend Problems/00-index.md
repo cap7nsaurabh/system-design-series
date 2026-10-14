@@ -1,5 +1,9 @@
 # System Design Series: Real-World Backend Challenges
 
+[🏠 Master Index](../README.md) | [🏛️ High-Level Design (HLD)](../HLD/00-index.md) | [🧱 Low-Level Design (LLD)](../LLD/00-index.md) | [📬 Message Queues](../Message%20Queues/00-index.md) | [🧩 Microservices](../Microservices%20Design/00-index.md) | [🍃 Spring Boot](../Spring%20Boot/00-course-index.md) | [💾 Databases](../Databases/00-index.md)
+
+---
+
 Welcome to the **Backend Problems** series. This section contains deep-dive architectural analyses of real-world backend engineering challenges, production failure post-mortems from top-tier tech companies (YouTube, Instagram, Netflix, Uber, Stripe, Discord, Pinterest), and production-grade code implementations.
 
 ---
@@ -68,4 +72,30 @@ Welcome to the **Backend Problems** series. This section contains deep-dive arch
   * *Key Concepts:* Transactional Outbox Pattern with Debezium CDC, Saga Orchestration (Temporal / Cadence) vs Choreography, Command Query Responsibility Segregation (CQRS), Idempotent consumers with unique constraints, Dead Letter Queues (DLQ).
 
 ---
-*Created as a comprehensive learning resource for advanced backend systems and architecture.*
+
+## 🔗 Cross-Curriculum Reference Matrix
+
+Connect these real-world backend architectural challenges to foundational guides and code implementations across the repository:
+
+| Backend Problem | Related HLD Chapter | Related LLD Guide | Related DB & MQ Guides |
+| :--- | :--- | :--- | :--- |
+| **01 Concurrency & Resource Booking** | [HLD 04: Databases](../HLD/04_Databases.md) | [LLD 03: Concurrency](../LLD/03-thread-safety-and-concurrency.md), [LLD 12: Ticket Booking](../LLD/12-problem-movie-ticket-booking.md) | [MySQL](../Databases/01-MySQL.md), [PostgreSQL](../Databases/02-PostgreSQL.md) |
+| **02 High-Throughput Counters** | [HLD 17: Algorithms](../HLD/17_Algorithms_and_Data_Structures.md) | [LLD 03: Concurrency](../LLD/03-thread-safety-and-concurrency.md) | [Redis](../Databases/06-Redis.md), [Cassandra](../Databases/05-Cassandra.md) |
+| **03 Burst Traffic & Resiliency** | [HLD 08: Microservices](../HLD/08_Microservices.md) | [LLD 09: Rate Limiter](../LLD/09-problem-rate-limiter.md) | [Microservices 03: Circuit Breaker](../Microservices%20Design/03_Circuit_Breaker_Pattern.md), [Microservices 11: Bulkhead](../Microservices%20Design/11_Bulkhead_Pattern.md) |
+| **04 Real-Time Location Tracking** | [HLD 16: Case Studies (Uber)](../HLD/16_System_Design_Case_Studies.md) | [LLD 01: LLD Approaches](../LLD/01-lld-approaches-and-architectures.md) | [Redis Geo](../Databases/06-Redis.md), [Kafka Deep Dive](../Message%20Queues/03_Apache_Kafka_Deep_Dive.md) |
+| **05 Distributed Transactions & Sagas** | [HLD 10: Distributed Systems](../HLD/10_Distributed_Systems_Fundamentals.md) | [LLD 06: Behavioral Patterns](../LLD/06-behavioral-design-patterns.md) | [Microservices 04: Saga](../Microservices%20Design/04_Saga_Pattern.md), [Microservices 10: Outbox](../Microservices%20Design/10_Outbox_Pattern.md) |
+| **06 Heavy Read Social Feeds** | [HLD 03: Caching](../HLD/03_Caching.md), [HLD 16: Twitter](../HLD/16_System_Design_Case_Studies.md) | [LLD 11: In-Memory Cache](../LLD/11-problem-in-memory-cache.md) | [Redis Timelines](../Databases/06-Redis.md) |
+| **07 FinTech & Banking Systems** | [HLD 10: Distributed Systems](../HLD/10_Distributed_Systems_Fundamentals.md) | [LLD 10: Splitwise](../LLD/10-problem-splitwise-expense-sharing.md) | [PostgreSQL](../Databases/02-PostgreSQL.md), [Oracle](../Databases/03-Oracle.md) |
+| **08 High-Frequency Trading** | [HLD 10: Distributed Systems](../HLD/10_Distributed_Systems_Fundamentals.md) | [LLD 03: Concurrency](../LLD/03-thread-safety-and-concurrency.md) | [TimescaleDB](../Databases/10-TimescaleDB-and-InfluxDB.md) |
+| **09 Gaming & Collaboration** | [HLD 06: API Design (WebSockets)](../HLD/06_API_Design.md) | [LLD 06: Behavioral Patterns](../LLD/06-behavioral-design-patterns.md) | [Spring Boot 19: WebSockets](../Spring%20Boot/19-graphql-websockets.md) |
+| **10 IoT & Telemetry** | [HLD 14: Data Pipelines](../HLD/14_Data_Pipelines.md) | [LLD 06: Observer Pattern](../LLD/06-behavioral-design-patterns.md) | [TimescaleDB / InfluxDB](../Databases/10-TimescaleDB-and-InfluxDB.md), [Kafka](../Message%20Queues/03_Apache_Kafka_Deep_Dive.md) |
+| **11 Healthcare & Telemedicine** | [HLD 12: Security](../HLD/12_Security.md) | [LLD 02: SOLID Principles](../LLD/02-solid-principles.md) | [PostgreSQL](../Databases/02-PostgreSQL.md) |
+| **12 Search & Indexing Systems** | [HLD 17: Algorithms (Trie)](../HLD/17_Algorithms_and_Data_Structures.md) | [LLD 05: Structural Patterns](../LLD/05-structural-design-patterns.md) | [Elasticsearch](../Databases/09-Elasticsearch.md) |
+| **13 Rate Limiting & Throttling** | [HLD 17: Algorithms](../HLD/17_Algorithms_and_Data_Structures.md) | [LLD 09: Rate Limiter](../LLD/09-problem-rate-limiter.md) | [Spring Boot 09: Rate Limiting](../Spring%20Boot/09-rate-limiting.md), [Redis](../Databases/06-Redis.md) |
+| **14 Event-Driven Patterns** | [HLD 05: Message Queues](../HLD/05_Message_Queues_and_Event_Driven_Architecture.md) | [LLD 06: Observer / Command](../LLD/06-behavioral-design-patterns.md) | [MQ 02: Messaging Patterns](../Message%20Queues/02_Messaging_Patterns_and_Architecture.md), [MQ 03: Kafka](../Message%20Queues/03_Apache_Kafka_Deep_Dive.md) |
+| **15 Caching Strategies Deep Dive** | [HLD 03: Caching](../HLD/03_Caching.md) | [LLD 11: In-Memory Cache](../LLD/11-problem-in-memory-cache.md) | [Redis](../Databases/06-Redis.md), [Spring Boot 08: Caching](../Spring%20Boot/08-caching.md) |
+| **16 Database Sharding** | [HLD 04: Databases](../HLD/04_Databases.md), [HLD 09: Scalability](../HLD/09_Scalability_Patterns.md) | [LLD 01: LLD Approaches](../LLD/01-lld-approaches-and-architectures.md) | [MySQL Vitess](../Databases/01-MySQL.md), [PostgreSQL](../Databases/02-PostgreSQL.md) |
+| **17 Real-Time Notifications** | [HLD 06: API Design](../HLD/06_API_Design.md) | [LLD 06: Observer Pattern](../LLD/06-behavioral-design-patterns.md) | [Redis Streams & PubSub](../Message%20Queues/06_Redis_Streams_and_PubSub_Deep_Dive.md), [Spring Boot 19](../Spring%20Boot/19-graphql-websockets.md) |
+
+---
+*System Design Series — Production Backend Architecture Master Index*

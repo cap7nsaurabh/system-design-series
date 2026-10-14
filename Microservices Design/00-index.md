@@ -1,5 +1,9 @@
 # Microservices Design Architecture Blueprint & Comprehensive Guide
 
+[🏠 Master Index](../README.md) | [🏛️ High-Level Design (HLD)](../HLD/00-index.md) | [🧱 Low-Level Design (LLD)](../LLD/00-index.md) | [⚡ Backend Problems](../Backend%20Problems/00-index.md) | [📬 Message Queues](../Message%20Queues/00-index.md) | [🍃 Spring Boot](../Spring%20Boot/00-course-index.md) | [💾 Databases](../Databases/00-index.md)
+
+---
+
 ## 1. Executive Architectural Overview & First Principles
 
 Microservices architecture decomposes a monolithic application into a suite of independently deployable, loosely coupled, and bounded services. Each service encapsulates a distinct business domain capability, maintains its own persistent state, and communicates across network boundaries via lightweight, language-agnostic protocols (such as HTTP/REST, gRPC, or asynchronous message streams).
@@ -665,3 +669,23 @@ Explore the comprehensive deep-dive guides for each pattern in this repository:
 10. [10. Outbox Pattern](10_Outbox_Pattern.md) — Eliminating dual-write vulnerabilities with reliable CDC event delivery.
 11. [11. Bulkhead Pattern](11_Bulkhead_Pattern.md) — Compartmentalizing CPU, thread, and connection resource pools.
 12. [12. Backends For Frontends (BFF)](12_Backends_For_Frontends_Pattern.md) — Dedicated backend layers tailored to multi-experience clients.
+
+---
+
+## 🔗 Cross-Curriculum References & Synergies
+
+| Microservices Pattern | Foundational Theory (HLD) | Real-World Scenario (Backend Problems) | Framework & Code (Spring Boot / LLD) |
+| :--- | :--- | :--- | :--- |
+| **01. API Gateway** | [HLD 06: API Design](../HLD/06_API_Design.md) | [BP 13: Rate Limiting](../Backend%20Problems/13-rate-limiting-and-throttling.md) | [Spring Boot 03: REST API](../Spring%20Boot/03-rest-api.md) |
+| **02. Service Discovery** | [HLD 08: Microservices](../HLD/08_Microservices.md) | [BP 03: Burst Traffic](../Backend%20Problems/03-handling-burst-traffic-and-resiliency.md) | [LLD 01: LLD Approaches](../LLD/01-lld-approaches-and-architectures.md) |
+| **03. Circuit Breaker** | [HLD 08: Microservices](../HLD/08_Microservices.md) | [BP 03: Resiliency](../Backend%20Problems/03-handling-burst-traffic-and-resiliency.md) | [LLD 06: State Pattern](../LLD/06-behavioral-design-patterns.md) |
+| **04. Saga Pattern** | [HLD 10: Distributed Systems](../HLD/10_Distributed_Systems_Fundamentals.md) | [BP 05: Distributed Sagas](../Backend%20Problems/05-distributed-transactions-sagas.md) | [MQ 02: Messaging Patterns](../Message%20Queues/02_Messaging_Patterns_and_Architecture.md) |
+| **05. Event Sourcing** | [HLD 05: Message Queues](../HLD/05_Message_Queues_and_Event_Driven_Architecture.md) | [BP 07: FinTech & Banking](../Backend%20Problems/07-fintech-and-banking-systems.md) | [MQ 03: Kafka Deep Dive](../Message%20Queues/03_Apache_Kafka_Deep_Dive.md) |
+| **06. CQRS Pattern** | [HLD 09: Scalability Patterns](../HLD/09_Scalability_Patterns.md) | [BP 06: Heavy Read Social Feeds](../Backend%20Problems/06-heavy-read-workloads-social-feeds.md) | [Databases 09: Elasticsearch](../Databases/09-Elasticsearch.md) |
+| **07. Strangler Fig** | [HLD 08: Microservices](../HLD/08_Microservices.md) | [BP 07: FinTech Banking Migration](../Backend%20Problems/07-fintech-and-banking-systems.md) | [Spring Boot 18: Deployment](../Spring%20Boot/18-deployment-docker-graalvm.md) |
+| **08. Sidecar Pattern** | [HLD 12: Security (mTLS)](../HLD/12_Security.md) | [BP 11: Healthcare Security](../Backend%20Problems/11-healthcare-and-telemedicine.md) | [Spring Boot 15: Observability](../Spring%20Boot/15-observability.md) |
+| **09. Database Per Service** | [HLD 04: Databases](../HLD/04_Databases.md) | [BP 16: Database Sharding](../Backend%20Problems/16-database-sharding-strategies.md) | [Databases 00: DB Index](../Databases/00-index.md) |
+| **10. Transactional Outbox** | [HLD 05: Message Queues](../HLD/05_Message_Queues_and_Event_Driven_Architecture.md) | [BP 14: Event-Driven Patterns](../Backend%20Problems/14-event-driven-architecture-patterns.md) | [MQ 02: Messaging Patterns](../Message%20Queues/02_Messaging_Patterns_and_Architecture.md) |
+| **11. Bulkhead Pattern** | [HLD 08: Microservices](../HLD/08_Microservices.md) | [BP 03: Burst Traffic & Resiliency](../Backend%20Problems/03-handling-burst-traffic-and-resiliency.md) | [LLD 03: Concurrency](../LLD/03-thread-safety-and-concurrency.md) |
+| **12. BFF Pattern** | [HLD 06: API Design](../HLD/06_API_Design.md) | [BP 17: Real-Time Push](../Backend%20Problems/17-real-time-notifications-and-push.md) | [Spring Boot 19: GraphQL & WebSockets](../Spring%20Boot/19-graphql-websockets.md) |
+

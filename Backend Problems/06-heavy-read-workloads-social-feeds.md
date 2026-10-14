@@ -274,8 +274,8 @@ In the Fan-Out on Write model, timelines are **pre-computed at write time**. Whe
 ```
 
 #### Detailed Write Lifecycle (Ingestion Flow):
-1. **Author publishes a post:** The client sends an HTTP `POST /v1/posts` containing text, media references, and user metadata to the [Post Write Service](file:///E:/project/system-design-series/Backend%20Problems/06-heavy-read-workloads-social-feeds.md#L450-L470).
-2. **Canonical Persistence:** The service writes the post record to the primary relational/document database ([`posts`](file:///E:/project/system-design-series/Backend%20Problems/06-heavy-read-workloads-social-feeds.md#L55-L65) table) and populates the global post entity cache in Redis (`post_cache:{post_id}`).
+1. **Author publishes a post:** The client sends an HTTP `POST /v1/posts` containing text, media references, and user metadata to the Post Write Service.
+2. **Canonical Persistence:** The service writes the post record to the primary relational/document database (`posts` table) and populates the global post entity cache in Redis (`post_cache:{post_id}`).
 3. **Event Publishing:** An asynchronous event `PostCreatedEvent(post_id, author_id, created_at)` is published to Apache Kafka on the `posts.raw` topic, keyed by `author_id`.
 4. **Graph Lookup:** Fan-out workers consume the event, querying the **Social Graph Service** (backed by Cassandra or a distributed graph DB) to retrieve the complete list of follower user IDs.
 5. **Chunked Pipeline Dispatch:** The worker divides the follower list into batches of 1,000 and uses non-blocking Redis pipelines to issue concurrent `ZADD` operations into each follower's sorted set timeline key: `timeline:{follower_id}`.
@@ -283,7 +283,7 @@ In the Fan-Out on Write model, timelines are **pre-computed at write time**. Whe
 
 #### Detailed Read Lifecycle (Retrieval Flow):
 1. **User opens app:** Client issues `GET /v1/timeline?limit=20&cursor=...`.
-2. **Single-Hop In-Memory Seek:** The [Feed Query API](file:///E:/project/system-design-series/Backend%20Problems/06-heavy-read-workloads-social-feeds.md#L263-L288) queries the user's dedicated Redis Sorted Set:
+2. **Single-Hop In-Memory Seek:** The Feed Query API queries the user's dedicated Redis Sorted Set:
    ```bash
    ZREVRANGEBYSCORE timeline:{user_id} +inf -inf LIMIT 0 20
    ```
@@ -511,7 +511,7 @@ In the Fan-Out on Read model, **no timelines are pre-computed at write time**. W
 
 #### Detailed Read Lifecycle:
 1. User requests feed (`GET /v1/timeline`).
-2. The [Feed Query API](file:///E:/project/system-design-series/Backend%20Problems/06-heavy-read-workloads-social-feeds.md#L327-L343) fetches the user's follow list (e.g., 500 followee IDs).
+2. The Feed Query API fetches the user's follow list (e.g., 500 followee IDs).
 3. The API distributes parallel asynchronous fetch requests across the Redis cluster, retrieving the latest 20 post IDs from each of the 500 followee sorted sets.
 4. The system executes an in-memory **K-Way Merge** using a Priority Queue (Min-Heap) to extract the globally latest 20 posts.
 5. Posts are hydrated and returned to the client.

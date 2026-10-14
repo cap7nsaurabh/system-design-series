@@ -1,4 +1,8 @@
-# 📚 System Design Series — Complete Curriculum
+# 📚 System Design Series — Complete High-Level Design (HLD) Curriculum
+
+[🏠 Master Index](../README.md) | [⚡ Backend Problems](../Backend%20Problems/00-index.md) | [🧱 Low-Level Design (LLD)](../LLD/00-index.md) | [📬 Message Queues](../Message%20Queues/00-index.md) | [🧩 Microservices](../Microservices%20Design/00-index.md) | [🍃 Spring Boot](../Spring%20Boot/00-course-index.md) | [💾 Databases](../Databases/00-index.md)
+
+---
 
 > **Role:** Principal Software Engineer  
 > **Focus:** Highly scalable, available, and consistent distributed backend systems  
@@ -8,7 +12,7 @@
 
 ## 🗺️ What This Series Covers
 
-This is a **16-document, production-grade curriculum** on distributed systems and backend engineering. Each document is a standalone deep dive on one core topic, written at the level of a senior/principal engineer at a top tech company.
+This is an **18-document, production-grade curriculum** on distributed systems and backend engineering. Each document is a standalone deep dive on one core topic, written at the level of a senior/principal engineer at a top tech company.
 
 **Every document includes:**
 - ✅ Core concepts explained from first principles

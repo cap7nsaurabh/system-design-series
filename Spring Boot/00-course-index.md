@@ -1,5 +1,9 @@
 # Spring Boot Deep-Dive Course
 
+[🏠 Master Index](../README.md) | [🏛️ High-Level Design (HLD)](../HLD/00-index.md) | [🧱 Low-Level Design (LLD)](../LLD/00-index.md) | [⚡ Backend Problems](../Backend%20Problems/00-index.md) | [📬 Message Queues](../Message%20Queues/00-index.md) | [🧩 Microservices](../Microservices%20Design/00-index.md) | [💾 Databases](../Databases/00-index.md)
+
+---
+
 Welcome to the ultimate Spring Boot Deep-Dive Course! This course is designed to take you from a basic understanding of Spring to an expert level, ready to tackle complex system design problems, production scenarios, and rigorous technical interviews.
 
 ## 🌟 Why Spring Boot?
@@ -86,3 +90,25 @@ To follow along with the code examples:
 4. Run `mvn spring-boot:run` or `./gradlew bootRun`.
 
 Let's get started with [Module 1: Fundamentals](./01-fundamentals.md)!
+
+---
+
+## 🔗 Cross-Curriculum References & Synergies
+
+| Spring Boot Module | Foundational Architecture (HLD) | Code & Low-Level Design (LLD) | Database & Messaging Systems |
+| :--- | :--- | :--- | :--- |
+| **01-02 Fundamentals & Annotations** | [HLD 08: Microservices](../HLD/08_Microservices.md) | [LLD 01: Clean Arch](../LLD/01-lld-approaches-and-architectures.md), [LLD 02: SOLID](../LLD/02-solid-principles.md) | — |
+| **03 REST API & Web Layer** | [HLD 06: API Design](../HLD/06_API_Design.md) | [LLD 05: Facade & Adapter](../LLD/05-structural-design-patterns.md) | [Microservices 01: API Gateway](../Microservices%20Design/01_API_Gateway_Pattern.md) |
+| **05 Database & JPA** | [HLD 04: Databases](../HLD/04_Databases.md) | [LLD 03: Concurrency](../LLD/03-thread-safety-and-concurrency.md) | [MySQL](../Databases/01-MySQL.md), [PostgreSQL](../Databases/02-PostgreSQL.md) |
+| **06 Concurrency & Race Conditions** | [HLD 10: Distributed Systems](../HLD/10_Distributed_Systems_Fundamentals.md) | [LLD 03: Thread Safety & Concurrency](../LLD/03-thread-safety-and-concurrency.md) | [Backend Problems 01: Concurrency Booking](../Backend%20Problems/01-concurrency-resource-booking.md) |
+| **07 Scheduling & Background Jobs** | [HLD 09: Scalability Patterns](../HLD/09_Scalability_Patterns.md) | [LLD 08: Elevator Dispatcher](../LLD/08-problem-elevator-system.md) | [Backend Problems 02: Counters](../Backend%20Problems/02-high-throughput-counters.md) |
+| **08 Caching Strategies** | [HLD 03: Caching](../HLD/03_Caching.md) | [LLD 11: In-Memory Cache (LRU/LFU)](../LLD/11-problem-in-memory-cache.md) | [Redis](../Databases/06-Redis.md), [Backend Problems 15: Caching](../Backend%20Problems/15-caching-strategies-deep-dive.md) |
+| **09 Rate Limiting** | [HLD 17: Algorithms](../HLD/17_Algorithms_and_Data_Structures.md) | [LLD 09: Rate Limiter](../LLD/09-problem-rate-limiter.md) | [Backend Problems 13: Rate Limiting at Scale](../Backend%20Problems/13-rate-limiting-and-throttling.md) |
+| **10 Security & JWT** | [HLD 12: Security](../HLD/12_Security.md) | [LLD 05: Proxy Pattern](../LLD/05-structural-design-patterns.md) | [Backend Problems 11: HIPAA Security](../Backend%20Problems/11-healthcare-and-telemedicine.md) |
+| **13 Advanced Databases** | [HLD 04: Databases](../HLD/04_Databases.md), [HLD 11: Storage](../HLD/11_Storage_Systems.md) | — | [MongoDB](../Databases/04-MongoDB.md), [Cassandra](../Databases/05-Cassandra.md) |
+| **14 Messaging & Event-Driven** | [HLD 05: Message Queues](../HLD/05_Message_Queues_and_Event_Driven_Architecture.md) | [LLD 06: Observer Pattern](../LLD/06-behavioral-design-patterns.md) | [Kafka Deep Dive](../Message%20Queues/03_Apache_Kafka_Deep_Dive.md), [RabbitMQ](../Message%20Queues/05_RabbitMQ_Deep_Dive.md) |
+| **15 Observability & Actuator** | [HLD 13: Observability](../HLD/13_Observability.md) | [LLD 05: Decorator Pattern](../LLD/05-structural-design-patterns.md) | [Microservices 08: Sidecar](../Microservices%20Design/08_Sidecar_Pattern.md) |
+| **17 Reactive WebFlux** | [HLD 09: Scalability Patterns](../HLD/09_Scalability_Patterns.md) | [LLD 03: Lock-Free & CAS](../LLD/03-thread-safety-and-concurrency.md) | [Message Queues 06: Redis Streams](../Message%20Queues/06_Redis_Streams_and_PubSub_Deep_Dive.md) |
+| **18 Deployment & GraalVM** | [HLD 08: Microservices](../HLD/08_Microservices.md) | — | [Microservices 07: Strangler Fig](../Microservices%20Design/07_Strangler_Fig_Pattern.md) |
+| **19 GraphQL & WebSockets** | [HLD 06: API Design](../HLD/06_API_Design.md) | [LLD 06: Mediator & Observer](../LLD/06-behavioral-design-patterns.md) | [Backend Problems 17: Real-Time Notifications](../Backend%20Problems/17-real-time-notifications-and-push.md) |
+

@@ -1,6 +1,10 @@
 # Databases: Deep Dive into SQL, NoSQL, Search & Time-Series Engines
 
-Welcome to the Databases series. This section covers leading database technologies, their core architectural internals, storage engine mechanics, real-world failure post-mortems from top tech companies, and exhaustive query/method syntax references.
+[🏠 Master Index](../README.md) | [🏛️ High-Level Design (HLD)](../HLD/00-index.md) | [🧱 Low-Level Design (LLD)](../LLD/00-index.md) | [⚡ Backend Problems](../Backend%20Problems/00-index.md) | [📬 Message Queues](../Message%20Queues/00-index.md) | [🧩 Microservices](../Microservices%20Design/00-index.md) | [🍃 Spring Boot](../Spring%20Boot/00-course-index.md)
+
+---
+
+Welcome to the **Databases** series. This section covers leading database technologies, their core architectural internals, storage engine mechanics, real-world failure post-mortems from top tech companies, and exhaustive query/method syntax references.
 
 ---
 
@@ -55,3 +59,25 @@ Specialized engines for full-text search, logging analytics, IoT telemetry, and 
 | **Full-Text Search / Log Aggregation** | Elasticsearch | Inverted indexes, BM25 scoring, fuzzy matching | OpenSearch |
 | **Social Connections / Fraud Rings / Knowledge Graph** | Neo4j | Index-Free Adjacency ($O(1)$ multi-hop traversals) | Amazon Neptune |
 | **Serverless Web Application on AWS** | DynamoDB | Zero server management, auto-scaling, pay-per-request | AWS Aurora Serverless |
+
+---
+
+## 🔗 Cross-Curriculum References & Synergies
+
+- **System Architecture & Storage Theory**:
+  - [HLD 04: Databases](../HLD/04_Databases.md) — Fundamental ACID, CAP theorem, B-Trees vs LSM, replication, and sharding.
+  - [HLD 11: Storage Systems](../HLD/11_Storage_Systems.md) — Block, file, and object storage mechanics (S3, Haystack, WAL).
+- **Microservices Data Patterns**:
+  - [Microservices 09: Database Per Service](../Microservices%20Design/09_Database_Per_Service_Pattern.md) — Enforcing strict bounded context data encapsulation.
+  - [Microservices 10: Transactional Outbox Pattern](../Microservices%20Design/10_Outbox_Pattern.md) — Eliminating dual-write bugs with Debezium CDC and DB WAL tailing.
+  - [Microservices 05: Event Sourcing](../Microservices%20Design/05_Event_Sourcing_Pattern.md) & [06: CQRS](../Microservices%20Design/06_CQRS_Pattern.md) — Polyglot read/write segregation.
+- **Framework Implementations in Spring Boot**:
+  - [Spring Boot 05: Database & JPA](../Spring%20Boot/05-database-jpa.md) — Hibernate, transaction management, connection pooling, and the N+1 problem.
+  - [Spring Boot 13: Advanced Databases](../Spring%20Boot/13-advanced-databases.md) — R2DBC reactive SQL, Spring Data MongoDB, and MyBatis.
+- **Real-World Backend Scenarios**:
+  - [Backend Problems 01: Concurrency Control](../Backend%20Problems/01-concurrency-resource-booking.md) — Row-level locking (`FOR UPDATE`) and Redis distributed locks.
+  - [Backend Problems 15: Caching Strategies](../Backend%20Problems/15-caching-strategies-deep-dive.md) — Redis L1/L2 cache topologies, stampedes, and eviction algorithms.
+  - [Backend Problems 16: Database Sharding](../Backend%20Problems/16-database-sharding-strategies.md) — Vitess, Citus, consistent hashing, and cross-shard queries.
+- **Low-Level Code Implementations**:
+  - [LLD 11: Thread-Safe In-Memory Cache](../LLD/11-problem-in-memory-cache.md) — Java implementation of LRU/LFU cache with TTL eviction.
+

@@ -2659,4 +2659,4 @@ public class Config {
 
 ---
 
-*Next Module → [03 — Spring Boot Auto-Configuration & the `@SpringBootApplication` Annotation](./03-auto-configuration.md)*
+*Next Module → [03 — REST API & Web Layer in Spring Boot](./03-rest-api.md)*

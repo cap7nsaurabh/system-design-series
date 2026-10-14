@@ -1,5 +1,9 @@
 # Message Queues & Distributed Event Streaming: System Design Masterclass
 
+[🏠 Master Index](../README.md) | [🏛️ High-Level Design (HLD)](../HLD/00-index.md) | [🧱 Low-Level Design (LLD)](../LLD/00-index.md) | [⚡ Backend Problems](../Backend%20Problems/00-index.md) | [🧩 Microservices](../Microservices%20Design/00-index.md) | [🍃 Spring Boot](../Spring%20Boot/00-course-index.md) | [💾 Databases](../Databases/00-index.md)
+
+---
+
 Welcome to the **Message Queues and Distributed Event Streaming** series. This repository provides an exhaustive, production-grade reference for modern asynchronous architectures, distributed logs, task queues, and message brokers. 
 
 Every guide in this module is engineered with comprehensive **High-Level Designs (HLD)** and **Low-Level Designs (LLD)**, exploring architectural topologies, wire protocols, storage engine internals, memory models, consensus algorithms, failover mechanics, and production implementation code.
@@ -130,3 +134,23 @@ flowchart TD
 | **Message Replay** | Native (Offset rewind) | Unsupported (Deleted on ACK) | Unsupported (Deleted on ACK) | Native (`XRANGE` / offset rewind) |
 | **Routing Flexibility** | Low (Partition key hash) | Low (Queue destination) | Extremely High (Topic/Direct/Headers) | Low (Stream key) |
 | **Operational Overhead** | High (KRaft / JVM / OS tuning) | Zero (Fully managed serverless) | Medium (Erlang BEAM / Clustering) | Low-Medium (Redis Cluster / Memory) |
+
+---
+
+## 🔗 Cross-Curriculum References & Synergies
+
+- **Distributed Architecture & Theory**:
+  - [HLD 05: Message Queues & Event-Driven Architecture](../HLD/05_Message_Queues_and_Event_Driven_Architecture.md) — Architectural overview, delivery semantics, and broker topologies.
+  - [HLD 10: Distributed Systems Fundamentals](../HLD/10_Distributed_Systems_Fundamentals.md) — KRaft consensus, Raft in RabbitMQ Quorum queues, and CAP trade-offs.
+- **Microservices Architectural Patterns**:
+  - [Microservices 04: Saga Pattern](../Microservices%20Design/04_Saga_Pattern.md) — Distributed transaction orchestration and choreography via message buses.
+  - [Microservices 05: Event Sourcing](../Microservices%20Design/05_Event_Sourcing_Pattern.md) — Modeling domain state as immutable event logs.
+  - [Microservices 06: CQRS Pattern](../Microservices%20Design/06_CQRS_Pattern.md) — Asynchronous event projection workers populating read materialized views.
+  - [Microservices 10: Transactional Outbox Pattern](../Microservices%20Design/10_Outbox_Pattern.md) — Resolving dual-writes via CDC and Kafka.
+- **Backend Problems & Industry Scenarios**:
+  - [Backend Problems 14: Event-Driven Architecture Patterns](../Backend%20Problems/14-event-driven-architecture-patterns.md) — End-to-end production event pipelines, DLQs, and idempotency.
+  - [Backend Problems 04: Real-Time Location Tracking](../Backend%20Problems/04-real-time-location-tracking.md) — High-velocity GPS ingestion via Kafka and WebSockets.
+  - [Backend Problems 10: IoT & Telemetry Streaming](../Backend%20Problems/10-iot-and-telemetry.md) — Edge MQTT ingestion to partitioned Kafka topics and Flink stream processing.
+- **Enterprise Framework Integration**:
+  - [Spring Boot 14: Messaging & Event-Driven](../Spring%20Boot/14-message-queues.md) — Spring Kafka listeners, RabbitTemplate, and dead-letter topics.
+
