@@ -144,7 +144,7 @@ RabbitMQ structures every AMQP entity as an isolated Erlang actor process:
 flowchart TD
     ClientTCP[Client TCP Connection] <-->|Raw Wire Bytes| OS_Socket[Kernel Socket Buffer]
     
-    subgraph BEAM Connection Process Boundary
+    subgraph BEAM_Connection_Boundary ["BEAM Connection Process Boundary"]
         OS_Socket <-->|gen_tcp:recv| Reader[rabbit_reader Process]
         Writer[rabbit_writer Process] -->|gen_tcp:send| OS_Socket
         
@@ -153,7 +153,7 @@ flowchart TD
         Supervisor --> SpawnCh2[Spawn Channel Process 2]
     end
 
-    subgraph Channel Contexts
+    subgraph Channel_Contexts ["Channel Contexts"]
         SpawnCh1[rabbit_channel: Ch 1]
         SpawnCh2[rabbit_channel: Ch 2]
     end
@@ -161,7 +161,7 @@ flowchart TD
     Reader -->|Demux Frames Ch 1| SpawnCh1
     Reader -->|Demux Frames Ch 2| SpawnCh2
 
-    subgraph Routing & Queues
+    subgraph Routing_And_Queues ["Routing & Queues"]
         SpawnCh1 -->|Route via Mnesia| ExchangeEval{Exchange Routing Logic}
         ExchangeEval -->|Erlang Cast Message| QueueProc1[rabbit_amqqueue_process: Queue A]
         ExchangeEval -->|Erlang Cast Message| QueueProc2[rabbit_amqqueue_process: Queue B]

@@ -131,17 +131,17 @@ flowchart TD
         Ex["Topic Exchange: 'orders.exchange'"]
         
         subgraph Queues["Erlang Process Queues"]
-            Q1["Queue: 'orders.eu'<br/>Binding: 'orders.eu.*'"]
-            Q2["Queue: 'orders.us'<br/>Binding: 'orders.us.*'"]
-            Q3["Queue: 'orders.audit'<br/>Binding: 'orders.#'"]
+            Q1["Queue: orders.eu (Binding: orders.eu.*)"]
+            Q2["Queue: orders.us (Binding: orders.us.*)"]
+            Q3["Queue: orders.audit (Binding: orders.#)"]
         end
     end
 
     subgraph ConsumerFleet["Competing Consumer Worker Fleet"]
-        W1["EU Order Worker 1<br/>(Prefetch=50)"]
-        W2["EU Order Worker 2<br/>(Prefetch=50)"]
-        W3["US Order Worker 1<br/>(Prefetch=50)"]
-        W4["Audit Log Ingester<br/>(Prefetch=500)"]
+        W1["EU Order Worker 1 (Prefetch=50)"]
+        W2["EU Order Worker 2 (Prefetch=50)"]
+        W3["US Order Worker 1 (Prefetch=50)"]
+        W4["Audit Log Ingester (Prefetch=500)"]
     end
 
     Pub1 -->|basic.publish routing_key='orders.eu.created'| Ex
