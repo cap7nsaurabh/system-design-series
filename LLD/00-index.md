@@ -55,7 +55,8 @@ LLD/
     ├── 09-problem-rate-limiter.md                 # Token Bucket, Leaky Bucket, Sliding Window Log/Counter, lock-free
     ├── 10-problem-splitwise-expense-sharing.md    # Expense splits, balances, Min Cash Flow graph simplification
     ├── 11-problem-in-memory-cache.md              # LRU/LFU cache with TTL eviction, ReadWriteLock, segmented striping
-    └── 12-problem-movie-ticket-booking.md         # Cinema seat locking with TTL, race prevention, transaction flow
+    ├── 12-problem-movie-ticket-booking.md         # Cinema seat locking with TTL, race prevention, transaction flow
+    └── 13-problem-thread-safe-music-player.md     # Multi-threaded audio player, State machine, buffer backpressure, Observer
 ```
 
 ---
@@ -165,6 +166,7 @@ Every problem includes:
 | **Splitwise Expense Sharing** | [`10-problem-splitwise-expense-sharing.md`](./10-problem-splitwise-expense-sharing.md) | Strategy (Splits: Equal, Exact, %), Observer | Graph Debt Simplification (Min Cash Flow), concurrent balance updates, `ConcurrentHashMap` |
 | **In-Memory Cache (LRU/LFU + TTL)** | [`11-problem-in-memory-cache.md`](./11-problem-in-memory-cache.md) | Strategy (Eviction), Template Method | `ReentrantReadWriteLock`, Segmented lock striping, background TTL cleaner |
 | **Movie Ticket Booking (BookMyShow)** | [`12-problem-movie-ticket-booking.md`](./12-problem-movie-ticket-booking.md) | State (Seat lifecycle), Strategy (Pricing) | Seat hold TTL lock, race condition prevention under flash crowd, atomic state flip |
+| **Thread-Safe Music Player** | [`13-problem-thread-safe-music-player.md`](./13-problem-thread-safe-music-player.md) | State, Strategy, Observer, Command, Decorator, Facade | Producer-consumer audio buffer, `ReentrantReadWriteLock` playlist, `Condition` pause/resume |
 
 ---
 
@@ -173,4 +175,4 @@ Every problem includes:
 1. **Foundations First:** Read [`01-lld-approaches-and-architectures.md`](./01-lld-approaches-and-architectures.md) and [`02-solid-principles.md`](./02-solid-principles.md) to build clean object modeling intuition.
 2. **Master Concurrency:** Study [`03-thread-safety-and-concurrency.md`](./03-thread-safety-and-concurrency.md). High-concurrency low-level design is expected in senior and staff engineering interviews.
 3. **Deep-Dive Patterns:** Study category indexes ([`04`](./04-creational-design-patterns.md), [`05`](./05-structural-design-patterns.md), [`06`](./06-behavioral-design-patterns.md)) and their respective pattern files ([`04-01`](./04-01-singleton-pattern.md) to [`06-11`](./06-11-visitor-pattern.md)).
-4. **Code Case Studies:** Solve and review problems [`07`](./07-problem-parking-lot.md) through [`12`](./12-problem-movie-ticket-booking.md). Try implementing them yourself first before inspecting the reference Java code.
+4. **Code Case Studies:** Solve and review problems [`07`](./07-problem-parking-lot.md) through [`13`](./13-problem-thread-safe-music-player.md). Try implementing them yourself first before inspecting the reference Java code.

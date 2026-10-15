@@ -152,6 +152,7 @@ flowchart TD
 * [10 Problem: Splitwise Expense Sharing](./LLD/10-problem-splitwise-expense-sharing.md) — Expense splits (Equal, Exact, %), balance sheets, and Min Cash Flow graph debt simplification
 * [11 Problem: In-Memory Cache (LRU/LFU/TTL)](./LLD/11-problem-in-memory-cache.md) — Thread-safe segmented cache, $O(1)$ LRU & LFU eviction, lazy/proactive TTL sweepers
 * [12 Problem: Movie Ticket Booking (BookMyShow)](./LLD/12-problem-movie-ticket-booking.md) — Cinema seat locking with TTL hold, race-condition immunity, and canonical deadlock avoidance
+* [13 Problem: Thread-Safe Music Player](./LLD/13-problem-thread-safe-music-player.md) — Multi-threaded audio player, State machine, bounded producer-consumer buffer, and Observer telemetry
 
 ---
 
