@@ -1,12 +1,4 @@
-# 5+ YOE Backend Engineer | Targeting ₹35–60+ LPA
-
-Hi LeetCode Community! 👋
-
-I've shortlisted **70 companies** based on compensation potential, interview difficulty, and alignment with my technical background.
-
-I'd love to hear from people who have **recently interviewed at** or **currently work at** these companies.
-
----
+# 5+ YOE Backend Engineer 
 
 ## 🟢 Priority 1: Strong Tech-Stack Matches / Near-Term Targets
 
@@ -106,14 +98,3 @@ I'd love to hear from people who have **recently interviewed at** or **currently
 
 ---
 
-## 💭 Final Thoughts
-
-I understand that cracking companies like **Google, Uber, Rippling, or Databricks** requires significant preparation.
-
-My immediate objective is to **prioritize companies where my backend experience is relevant**, prepare systematically, and secure a good **SDE-2 / Senior Backend Engineer** opportunity.
-
-Thanks in advance! 🙏
-
----
-
-`#InterviewPreparation` `#SDE2` `#BackendEngineer` `#SystemDesign` `#LeetCode` `#IndiaTech`
