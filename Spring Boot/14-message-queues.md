@@ -1,642 +1,898 @@
-# Messaging & Event-Driven Architecture in Spring Boot
+# 14 — Messaging & Event-Driven Architecture in Spring Boot 3.x
 
-In modern distributed systems and microservices architectures, synchronous HTTP calls between services often lead to tight coupling, cascading failures, and degraded performance. Event-Driven Architecture (EDA) and Message Queues provide a robust alternative by decoupling producers and consumers, enabling asynchronous communication, and improving overall system resilience and scalability.
-
-This module provides a highly detailed, interview-focused deep dive into Messaging & Event-Driven Architecture in Spring Boot. We will cover core concepts, Spring for Apache Kafka, Spring AMQP (RabbitMQ), distributed design patterns, testing strategies, and critical interview traps.
+> **Module Goal:** Master modern asynchronous messaging and event-driven architecture in Spring Boot 3.x (Java 17/21). From distributed log streaming with Apache Kafka and AMQP routing with RabbitMQ, to reliable consumer acknowledgment models, poison pill isolation, consumer idempotency, and solving the distributed dual-write problem via the Transactional Outbox Pattern and `@TransactionalEventListener(AFTER_COMMIT)`.
 
 ---
 
-## 1. Event-Driven Architecture Basics
+## Table of Contents
 
-### 1.1 Synchronous vs Asynchronous Microservices
-
-When designing microservices, service-to-service communication fundamentally falls into two categories:
-
-| Feature | Synchronous (REST/gRPC) | Asynchronous (Messaging/EDA) |
-| :--- | :--- | :--- |
-| **Coupling** | High. Caller must know the callee's address and API. | Low. Producer and consumer are independent. |
-| **Availability**| Both services must be up simultaneously (Temporal Coupling). | Consumer can be down; messages are stored in the broker. |
-| **Latency** | Caller waits for the response, adding to total request time. | Caller fires the event and returns immediately. |
-| **Failure Handling**| Cascading failures if downstream services are slow/down. | Resilient. Messages are queued and processed when services recover. |
-| **Scalability** | Harder to scale individually under sudden traffic spikes. | Easy to scale consumers to drain queues faster (Load Leveling). |
-
-> [!IMPORTANT]
-> A common interview question is: "When would you choose synchronous over asynchronous communication?"
-> **Answer**: Choose synchronous when an immediate response is strictly required for the user experience (e.g., login authentication, fetching real-time account balance). Choose asynchronous for background processing, notifications, or eventual consistency operations (e.g., sending a welcome email, processing an order).
-
-### 1.2 Decoupling with Message Brokers
-
-A **Message Broker** (e.g., Kafka, RabbitMQ) acts as an intermediary. Services no longer talk directly to one another. Instead, a service (Producer) sends a message to the broker, and other services (Consumers) read from the broker. This provides:
-- **Temporal Decoupling**: Producers and consumers don't need to be alive at the same time.
-- **Location Decoupling**: Producers don't need to know the IPs or hostnames of consumers.
-
-### 1.3 Pub/Sub vs Point-to-Point
-
-Messaging models generally fall into two paradigms:
-
-1. **Point-to-Point (Queue-based)**:
-   - A message is sent to a specific queue.
-   - Even if multiple consumers listen to the queue, exactly **one** consumer processes each message.
-   - Great for distributing workloads (e.g., job queues).
-
-2. **Publish/Subscribe (Topic-based)**:
-   - A message is published to a topic.
-   - **Multiple** independent consumers (or consumer groups) can subscribe to the topic.
-   - Every subscriber gets a copy of the message.
-   - Great for event broadcasting (e.g., "OrderCreatedEvent").
+1. [Architectural Foundations: Synchronous vs Asynchronous EDA](#1-architectural-foundations-synchronous-vs-asynchronous-eda)
+2. [Message Broker Paradigms & Topologies](#2-message-broker-paradigms--topologies)
+   - [Approach 1: Apache Kafka Distributed Append-Only Event Log](#approach-1-apache-kafka-distributed-append-only-event-log)
+   - [Approach 2: RabbitMQ AMQP Advanced Exchange Routing](#approach-2-rabbitmq-amqp-advanced-exchange-routing)
+   - [Approach 3: In-Memory Spring Boot `ApplicationEventPublisher`](#approach-3-in-memory-spring-boot-applicationeventpublisher)
+   - [Approach 4: Cloud-Managed SQS/SNS via Spring Cloud AWS](#approach-4-cloud-managed-sqssns-via-spring-cloud-aws)
+3. [Consumer Reliability & Acknowledgment Strategies](#3-consumer-reliability--acknowledgment-strategies)
+   - [Approach 1: Strict Manual Synchronous Acknowledgment (`MANUAL_IMMEDIATE`)](#approach-1-strict-manual-synchronous-acknowledgment-manual_immediate)
+   - [Approach 2: High-Throughput Batch Consumption (`AckMode.BATCH`)](#approach-2-high-throughput-batch-consumption-ackmodebatch)
+   - [Approach 3: Non-Blocking Retries with `@RetryableTopic` & Dead Letter Topics (DLT)](#approach-3-non-blocking-retries-with-retryabletopic--dead-letter-topics-dlt)
+   - [Approach 4: Poison Pill Defense via `ErrorHandlingDeserializer`](#approach-4-poison-pill-defense-via-errorhandlingdeserializer)
+4. [Consumer Idempotency & Deduplication Strategies](#4-consumer-idempotency--deduplication-strategies)
+   - [Approach 1: Relational Unique Constraint Idempotency Table](#approach-1-relational-unique-constraint-idempotency-table)
+   - [Approach 2: Distributed In-Memory Cache (Redis Atomic Key + TTL)](#approach-2-distributed-in-memory-cache-redis-atomic-key--ttl)
+   - [Approach 3: Deterministic Domain State Machine Guard](#approach-3-deterministic-domain-state-machine-guard)
+5. [Transactional Synchronization & Dual-Write Prevention](#5-transactional-synchronization--dual-write-prevention)
+   - [Approach 1: Transactional Outbox Pattern with Debezium CDC](#approach-1-transactional-outbox-pattern-with-debezium-cdc)
+   - [Approach 2: `@TransactionalEventListener(phase = AFTER_COMMIT)`](#approach-2-transactionaleventlistenerphase--after_commit)
+   - [Approach 3: Synchronized Kafka Transactions (`KafkaTransactionManager`)](#approach-3-synchronized-kafka-transactions-kafkatransactionmanager)
+6. [Message Ordering & Concurrency Partitioning](#6-message-ordering--concurrency-partitioning)
+7. [Comprehensive Configuration Reference](#7-comprehensive-configuration-reference)
+8. [⚠️ Interview Traps & Production Gotchas](#️-interview-traps--production-gotchas)
+9. [📝 Architectural Comparison Matrix](#-architectural-comparison-matrix)
+10. [❓ Practice Questions & Real-World Scenarios](#-practice-questions--real-world-scenarios)
 
 ---
 
-## 2. Spring for Apache Kafka
+## 1. Architectural Foundations: Synchronous vs Asynchronous EDA
 
-Apache Kafka is a distributed event streaming platform capable of handling trillions of events a day. Unlike traditional message queues, Kafka stores streams of records continuously in an append-only log.
+In modern distributed microservices, tight synchronous HTTP/REST couplings introduce severe availability degradation:
 
-### 2.1 Kafka Concepts
-- **Topic**: A category or feed name to which records are published.
-- **Partition**: Topics are divided into partitions for scalability. A partition is an ordered, immutable sequence of records.
-- **Offset**: A unique sequential ID assigned to each record within a partition.
-- **Consumer Group**: Consumers sharing the same group ID. Each partition is consumed by exactly one consumer within a consumer group.
+```
+Synchronous Chain (Brittle, Temporal Coupling):
+Client ──▶ Service A ──(HTTP)──▶ Service B ──(HTTP)──▶ Service C (500ms latency, 1 down = ALL down!)
 
-### 2.2 Setup and application.yml Configuration
-
-**Dependencies (pom.xml):**
-```xml
-<dependency>
-    <groupId>org.springframework.kafka</groupId>
-    <artifactId>spring-kafka</artifactId>
-</dependency>
+Asynchronous Event-Driven Architecture (Resilient, Decoupled):
+Client ──▶ Service A ──▶ Message Broker (Kafka/RabbitMQ)
+                           ├──▶ Service B (Processes at own pace)
+                           └──▶ Service C (Can be offline, picks up when back online)
 ```
 
-**application.yml:**
-```yaml
-spring:
-  kafka:
-    bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all # Wait for all replicas to acknowledge (highest durability)
-      retries: 3
-    consumer:
-      group-id: "order-service-group"
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
-      properties:
-        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
-        spring.json.trusted.packages: "com.example.events"
-      enable-auto-commit: false # Crucial for manual acknowledgment
-    listener:
-      ack-mode: manual_immediate
-      concurrency: 3 # Number of threads/consumers in the listener container
-```
+---
 
-> [!TIP]
-> Always use `ErrorHandlingDeserializer` in Spring Kafka. If a standard deserializer fails (e.g., poison pill JSON), the consumer will infinitely loop trying to read the same offset. `ErrorHandlingDeserializer` catches the exception, allows the message to be skipped or sent to a DLT, and moves the offset forward.
+## 2. Message Broker Paradigms & Topologies
 
-### 2.3 KafkaTemplate for Producing Messages
+Selecting a message broker dictates whether your system operates as a **re-readable distributed log** (Kafka) or a **dynamic routing queue** (RabbitMQ).
 
-Spring provides `KafkaTemplate` to send messages.
+---
+
+### Approach 1: Apache Kafka Distributed Append-Only Event Log
+
+#### Scenario
+High-throughput event streaming architectures (order placement, clickstreams, financial transactions, IoT telemetry) with millions of events per second requiring strict partition-level ordering and event re-playability.
+
+#### Use-Case
+Event-driven backbones where multiple independent microservices must consume identical event streams at different speeds without depleting messages from the topic.
+
+#### Benefits Over Others
+- **Replayability & Retention:** Messages are not deleted upon consumption; they persist for a configurable retention window (e.g., 7 days or infinite), allowing new services to re-read history from offset 0.
+- **Massive Scalability:** Partitions distribute load horizontally across brokers.
+- **Strict Ordering per Key:** Messages published with identical keys hash to the same partition, guaranteeing strict FIFO processing.
+
+#### Production-Grade Code Example
 
 ```java
-package com.example.producer;
+package com.example.messaging.kafka;
 
-import com.example.events.OrderCreatedEvent;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+public record OrderEvent(String orderId, String customerId, double totalAmount, Instant timestamp) {}
+
 @Service
-public class OrderEventPublisher {
+@RequiredArgsConstructor
+@Slf4j
+public class KafkaOrderEventPublisher {
 
-    private final KafkaTemplate<String, OrderCreatedEvent> kafkaTemplate;
+    private final KafkaTemplate<String, OrderEvent> kafkaTemplate;
+    private static final String TOPIC = "orders.v1";
 
-    public OrderEventPublisher(KafkaTemplate<String, OrderCreatedEvent> kafkaTemplate) {
-        this.kafkaTemplate = kafkaTemplate;
-    }
+    public CompletableFuture<SendResult<String, OrderEvent>> publishOrderCreated(OrderEvent event) {
+        // Using orderId as the partition routing key guarantees strict partition ordering per order
+        String partitionKey = event.orderId();
 
-    public void publishOrderCreated(OrderCreatedEvent event) {
-        String topic = "order-events";
-        String routingKey = event.getOrderId(); // Key ensures same order goes to same partition
+        ProducerRecord<String, OrderEvent> record = new ProducerRecord<>(TOPIC, partitionKey, event);
+        record.headers().add("X-Correlation-ID", UUID.randomUUID().toString().getBytes());
 
-        // Spring Kafka 3.x returns CompletableFuture
-        CompletableFuture<SendResult<String, OrderCreatedEvent>> future = 
-            kafkaTemplate.send(topic, routingKey, event);
+        log.info("Dispatching Kafka event to topic '{}' with key '{}'", TOPIC, partitionKey);
 
-        future.whenComplete((result, ex) -> {
+        return kafkaTemplate.send(record).whenComplete((result, ex) -> {
             if (ex == null) {
-                System.out.println("Message sent successfully to partition " 
-                    + result.getRecordMetadata().partition() 
-                    + " with offset " + result.getRecordMetadata().offset());
+                log.info("Kafka publish confirmed: topic='{}', partition={}, offset={}",
+                        result.getRecordMetadata().topic(),
+                        result.getRecordMetadata().partition(),
+                        result.getRecordMetadata().offset());
             } else {
-                System.err.println("Failed to send message: " + ex.getMessage());
-                // Handle failure (e.g., save to fallback DB table)
+                log.error("Failed to publish event for order '{}'", event.orderId(), ex);
             }
         });
     }
 }
 ```
 
-### 2.4 @KafkaListener for Consuming Messages
-
-```java
-package com.example.consumer;
-
-import com.example.events.OrderCreatedEvent;
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
-import org.springframework.messaging.handler.annotation.Payload;
-import org.springframework.stereotype.Component;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-@Component
-public class OrderEventConsumer {
-
-    private static final Logger log = LoggerFactory.getLogger(OrderEventConsumer.class);
-
-    @KafkaListener(
-        topics = "order-events", 
-        groupId = "inventory-service-group",
-        containerFactory = "kafkaListenerContainerFactory"
-    )
-    public void handleOrderCreated(@Payload OrderCreatedEvent event, Acknowledgment acknowledgment) {
-        try {
-            log.info("Received order created event for order: {}", event.getOrderId());
-            
-            // Business logic to update inventory
-            processInventoryUpdate(event);
-            
-            // Explicitly acknowledge the message
-            acknowledgment.acknowledge();
-        } catch (Exception e) {
-            log.error("Error processing message for order: {}", event.getOrderId(), e);
-            // Do not acknowledge here; let it trigger error handling/retries
-            throw e;
-        }
-    }
-
-    private void processInventoryUpdate(OrderCreatedEvent event) {
-        // Implementation
-    }
-}
-```
-
-### 2.5 Acknowledgment Modes (MANUAL vs AUTO)
-
-Spring Kafka provides several acknowledgment modes via `ContainerProperties.AckMode`:
-
-1. **RECORD**: Commits the offset after the listener returns for *each* record.
-2. **BATCH**: (Default) Commits the offset after the listener returns for the *entire batch* of records polled.
-3. **MANUAL**: The listener must call `Acknowledgment.acknowledge()`. The commit is actually performed when the batch finishes.
-4. **MANUAL_IMMEDIATE**: Commits immediately when `acknowledgment.acknowledge()` is called (synchronous block until committed).
-
-> [!WARNING]
-> Relying on auto-commit (`enable-auto-commit=true`) can lead to message loss. If a consumer pulls messages, auto-commits the offset in the background, but then crashes before processing them, those messages are lost forever. **Always use MANUAL or MANUAL_IMMEDIATE with `enable-auto-commit=false` in production.**
-
-### 2.6 Error Handling and RetryTopic (Non-blocking Retries)
-
-In Kafka, if you block a consumer thread to sleep and retry, no other messages on that partition can be processed. This is a **blocking retry**. 
-Spring Kafka provides **Non-blocking Retries** using `@RetryableTopic`. It creates separate retry topics (e.g., `order-events-retry-0`, `order-events-retry-1`) with backoff delays, leaving the main topic unblocked.
-
-```java
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.annotation.RetryableTopic;
-import org.springframework.kafka.retrytopic.TopicSuffixingStrategy;
-import org.springframework.retry.annotation.Backoff;
-
-@Component
-public class RobustConsumer {
-
-    @RetryableTopic(
-        attempts = "4", // Main + 3 retries
-        backoff = @Backoff(delay = 1000, multiplier = 2.0),
-        topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
-        exclude = {IllegalArgumentException.class} // Don't retry validation errors
-    )
-    @KafkaListener(topics = "order-events", groupId = "shipping-group")
-    public void listen(OrderCreatedEvent event) {
-        // Process... throws exception on transient failure
-    }
-    
-    // Fallback method (DLT handler)
-    @org.springframework.kafka.annotation.DltHandler
-    public void handleDlt(OrderCreatedEvent event, @org.springframework.kafka.support.KafkaHeaders.ReceivedTopic String topic) {
-        System.out.println("Message sent to DLT from topic " + topic + ". OrderID: " + event.getOrderId());
-        // Save to manual intervention DB table
-    }
-}
-```
-
 ---
 
-## 3. Spring AMQP (RabbitMQ)
+### Approach 2: RabbitMQ AMQP Advanced Exchange Routing
 
-RabbitMQ is a traditional message broker implementing the AMQP protocol. It is highly flexible and excels at complex routing.
+#### Scenario
+Transactional task dispatch, work queues, complex topic wildcards (`orders.europe.*`), or fanout broadcasts where messages must be routed dynamically based on headers or routing keys.
 
-### 3.1 RabbitMQ Core Concepts
-- **Exchange**: Receives messages from producers and pushes them to queues based on routing rules.
-- **Queue**: A buffer that stores messages.
-- **Binding**: A link between a queue and an exchange.
-- **Routing Key**: A key that the exchange uses to decide which queue(s) to route the message to.
+#### Use-Case
+Complex routing topologies (e.g., routing payment events to a fraud queue, a settlement queue, and an audit queue simultaneously via Topic or Fanout exchanges).
 
-### 3.2 Exchange Types
+#### Benefits Over Others
+- **Complex Routing Logic:** Supports direct, fanout, topic wildcards (`*` and `#`), and header-based exchange routing.
+- **Queue-Level TTL & Priorities:** Individual messages can have native TTL and priority queue levels (1-10).
+- **Lightweight Broker Model:** Low latency and minimal resource overhead for discrete message passing.
 
-| Exchange Type | Routing Logic | Use Case |
-| :--- | :--- | :--- |
-| **Direct** | Exact match of routing key. | Point-to-point communication (e.g., `pdf.create`). |
-| **Topic** | Wildcard match (`*` matches one word, `#` matches zero or more). | Subscribing to specific event categories (e.g., `order.*.created`). |
-| **Fanout** | Broadcasts to ALL bound queues, ignoring routing key. | Pub/Sub broadcasting (e.g., cache invalidation). |
-| **Headers** | Routes based on AMQP message headers instead of routing keys. | Complex routing logic based on metadata. |
-
-### 3.3 Setup and application.yml
-
-**Dependencies:**
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-amqp</artifactId>
-</dependency>
-```
-
-**application.yml:**
-```yaml
-spring:
-  rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
-    listener:
-      simple:
-        acknowledge-mode: manual
-        prefetch: 10
-        retry:
-          enabled: true
-          max-attempts: 3
-          initial-interval: 1000ms
-```
-
-### 3.4 RabbitMQ Configuration (Exchanges, Queues, Bindings)
+#### Production-Grade Code Example
 
 ```java
-package com.example.config;
+package com.example.messaging.rabbitmq;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Service;
 
 @Configuration
-public class RabbitConfig {
+public class RabbitMqTopologyConfig {
 
-    public static final String EXCHANGE_NAME = "order.exchange";
-    public static final String QUEUE_NAME = "inventory.queue";
-    public static final String ROUTING_KEY = "order.created";
+    public static final String EXCHANGE_NAME = "enterprise.orders.topic";
+    public static final String CRITICAL_QUEUE = "orders.critical.queue";
+    public static final String AUDIT_QUEUE = "orders.audit.queue";
 
-    // 1. Declare Exchange
     @Bean
-    public DirectExchange orderExchange() {
-        return new DirectExchange(EXCHANGE_NAME);
+    public TopicExchange orderTopicExchange() {
+        return ExchangeBuilder.topicExchange(EXCHANGE_NAME).durable(true).build();
     }
 
-    // 2. Declare Queue
     @Bean
-    public Queue inventoryQueue() {
-        // queueName, durable, exclusive, autoDelete
-        return new Queue(QUEUE_NAME, true); 
+    public Queue criticalQueue() {
+        return QueueBuilder.durable(CRITICAL_QUEUE)
+                .withArgument("x-max-priority", 10) // Supports priority messages
+                .build();
     }
 
-    // 3. Bind Queue to Exchange
     @Bean
-    public Binding binding(Queue inventoryQueue, DirectExchange orderExchange) {
-        return BindingBuilder.bind(inventoryQueue).to(orderExchange).with(ROUTING_KEY);
+    public Queue auditQueue() {
+        return QueueBuilder.durable(AUDIT_QUEUE).build();
+    }
+
+    // Critical queue receives only high-priority order events
+    @Bean
+    public Binding criticalBinding(Queue criticalQueue, TopicExchange orderTopicExchange) {
+        return BindingBuilder.bind(criticalQueue).to(orderTopicExchange).with("orders.critical.*");
+    }
+
+    // Audit queue receives ALL order events via wildcard '#'
+    @Bean
+    public Binding auditBinding(Queue auditQueue, TopicExchange orderTopicExchange) {
+        return BindingBuilder.bind(auditQueue).to(orderTopicExchange).with("orders.#");
     }
 }
-```
 
-### 3.5 RabbitTemplate and @RabbitListener
-
-**Producer:**
-```java
 @Service
-public class RabbitProducer {
-    private final RabbitTemplate rabbitTemplate;
+@RequiredArgsConstructor
+@Slf4j
+class RabbitOrderDispatcher {
 
-    public RabbitProducer(RabbitTemplate rabbitTemplate) {
-        this.rabbitTemplate = rabbitTemplate;
-    }
+    private final AmqpTemplate amqpTemplate;
 
-    public void sendOrderMessage(OrderCreatedEvent event) {
-        rabbitTemplate.convertAndSend(
-            RabbitConfig.EXCHANGE_NAME, 
-            RabbitConfig.ROUTING_KEY, 
-            event
+    public void dispatchCriticalOrder(String orderId, Object payload) {
+        log.info("Dispatching critical order '{}' via AMQP", orderId);
+        amqpTemplate.convertAndSend(
+                RabbitMqTopologyConfig.EXCHANGE_NAME,
+                "orders.critical.payment",
+                payload,
+                message -> {
+                    message.getMessageProperties().setPriority(9); // Highest priority
+                    return message;
+                }
         );
     }
 }
 ```
 
-**Consumer:**
+---
+
+### Approach 3: In-Memory Spring Boot `ApplicationEventPublisher`
+
+#### Scenario
+Modular monoliths or single-service domain events where components must be decoupled (e.g., `OrderPlacedEvent` notifies `EmailService` and `AnalyticsService`) without the operational overhead of managing external brokers.
+
+#### Use-Case
+Local bounded context communication where event consumption occurs within the same JVM process.
+
+#### Benefits Over Others
+- **Zero External Infrastructure:** No Kafka brokers or RabbitMQ clusters to manage.
+- **In-Memory Speed:** Sub-microsecond dispatch latency.
+- **Transactional Synchronization:** Integrates with `@TransactionalEventListener` to execute only after database commits.
+
+#### Production-Grade Code Example
+
 ```java
-import com.rabbitmq.client.Channel;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.amqp.support.AmqpHeaders;
-import org.springframework.messaging.handler.annotation.Header;
+package com.example.messaging.inmemory;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import java.io.IOException;
+import org.springframework.stereotype.Service;
+
+public record UserRegisteredEvent(String userId, String email) {}
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class RegistrationService {
+
+    private final ApplicationEventPublisher eventPublisher;
+
+    public void registerUser(String userId, String email) {
+        log.info("Persisting user '{}' in database", userId);
+        // Database write...
+
+        // Publish in-memory event to decouple notification logic
+        eventPublisher.publishEvent(new UserRegisteredEvent(userId, email));
+    }
+}
 
 @Component
-public class RabbitConsumer {
+@Slf4j
+class WelcomeEmailEventListener {
 
-    @RabbitListener(queues = RabbitConfig.QUEUE_NAME)
-    public void receiveMessage(OrderCreatedEvent event, 
-                               Channel channel, 
-                               @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag) throws IOException {
+    @Async("taskExecutor")
+    @EventListener
+    public void onUserRegistered(UserRegisteredEvent event) {
+        log.info("Sending welcome email to '{}' on background thread: {}",
+                event.email(), Thread.currentThread().getName());
+        // SMTP logic...
+    }
+}
+```
+
+---
+
+### Approach 4: Cloud-Managed SQS/SNS via Spring Cloud AWS
+
+#### Scenario
+Serverless or cloud-native architectures deployed on AWS ECS/EKS where operational simplicity and high availability are prioritized over custom broker management.
+
+#### Use-Case
+Fanout architectures using Amazon SNS topics to push events across multiple Amazon SQS queues with automated dead-letter queues managed by AWS.
+
+#### Benefits Over Others
+- **Fully Managed:** Zero broker provisioning, OS patching, or partition balancing.
+- **Pay-per-Use:** Scales to zero when idle; bills purely on request count.
+
+---
+
+## 3. Consumer Reliability & Acknowledgment Strategies
+
+How a consumer acknowledges messages determines whether your system risks message loss or duplicate deliveries.
+
+```
+Consumer Acknowledgment Strategies
+                   │
+    ┌──────────────┼──────────────┐
+    ▼              ▼              ▼
+Manual Immediate  Batch Ack      Non-Blocking Retries (DLT)
+- Zero message    - Highest      - Diverts poison pills to retry topics
+  loss risk        throughput    - Prevents head-of-line blocking
+- Offset committed - Acks batch   - Preserves consumer availability
+  per record       at end
+```
+
+---
+
+### Approach 1: Strict Manual Synchronous Acknowledgment (`MANUAL_IMMEDIATE`)
+
+#### Scenario
+Financial transaction processing, order billing, or mission-critical accounting where processing failure must prevent offset commits.
+
+#### Use-Case
+Production Kafka consumers where auto-commit must be disabled to guarantee at-least-once processing semantics.
+
+#### Benefits Over Others
+- **Guaranteed No Data Loss:** If the consumer container crashes mid-processing, the message offset has not been committed; Kafka will re-deliver it upon rebalance.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.messaging.ack.manual;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.stereotype.Component;
+
+@Component
+@Slf4j
+public class ResilientPaymentConsumer {
+
+    @KafkaListener(
+            topics = "payments.v1",
+            groupId = "billing-engine",
+            containerFactory = "manualAckKafkaListenerContainerFactory"
+    )
+    public void onPaymentRecord(ConsumerRecord<String, String> record, Acknowledgment ack) {
         try {
-            System.out.println("Processing event: " + event.getOrderId());
-            // Process logic...
-            
-            // Manual Ack
-            channel.basicAck(deliveryTag, false);
-        } catch (Exception e) {
-            // Reject and re-queue, or send to DLX
-            // basicReject(deliveryTag, requeue)
-            channel.basicReject(deliveryTag, false); 
+            log.info("Processing payment message: key='{}', partition={}, offset={}",
+                    record.key(), record.partition(), record.offset());
+
+            processFinancialDebit(record.value());
+
+            // Commit offset synchronously ONLY after successful processing
+            ack.acknowledge();
+            log.debug("Successfully committed offset for key: {}", record.key());
+
+        } catch (Exception ex) {
+            log.error("Fatal failure processing payment record at offset {}. Withholding ACK!",
+                    record.offset(), ex);
+            // Withhold acknowledgment; message will be re-delivered upon restart or rebalance
+            throw new RuntimeException("Withholding ACK due to processing failure", ex);
+        }
+    }
+
+    private void processFinancialDebit(String payload) {}
+}
+```
+
+---
+
+### Approach 2: High-Throughput Batch Consumption (`AckMode.BATCH`)
+
+#### Scenario
+Consuming 50,000 telemetry sensor records, clickstream updates, or log events per second where committing offsets individually degrades broker performance.
+
+#### Use-Case
+High-throughput ingestion pipelines aggregating batches of messages before writing them to disk or a database.
+
+#### Benefits Over Others
+- **Maximum Consumer Throughput:** Polling returns batches of 500 records; committing the offset once per batch reduces broker network round trips by 99%.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.messaging.ack.batch;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+@Slf4j
+public class BulkTelemetryConsumer {
+
+    @KafkaListener(
+            topics = "iot.sensors",
+            groupId = "telemetry-aggregator",
+            containerFactory = "batchKafkaListenerContainerFactory" // batch listener enabled
+    )
+    public void consumeBatch(List<ConsumerRecord<String, String>> records) {
+        log.info("Polled batch of {} telemetry records from Kafka", records.size());
+
+        // Perform bulk database insert via JdbcTemplate.batchUpdate
+        persistAllTelemetry(records);
+
+        // Spring automatically commits the entire batch offset upon method return!
+    }
+
+    private void persistAllTelemetry(List<ConsumerRecord<String, String>> records) {}
+}
+```
+
+---
+
+### Approach 3: Non-Blocking Retries with `@RetryableTopic` & Dead Letter Topics (DLT)
+
+#### Scenario
+A consumer fails due to an external service outage (e.g., third-party payment gateway down). Blocking the consumer thread halts partition consumption for all subsequent valid messages.
+
+#### Use-Case
+Enterprise event consumption where failed messages are routed to separate retry topics with backoff intervals, preventing head-of-line blocking.
+
+#### Benefits Over Others
+- **Non-Blocking Execution:** The main topic partition continues moving forward; failed messages are republished to retry topics (e.g., `orders-retry-1000`, `orders-retry-2000`).
+- **Automated Dead-Letter Routing:** After exhausting retry attempts, messages automatically route to a Dead Letter Topic (`orders-dlt`) for manual inspection.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.messaging.retry;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.annotation.DltHandler;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.kafka.retrytopic.TopicSuffixingStrategy;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.stereotype.Component;
+
+@Component
+@Slf4j
+public class NonBlockingRetryConsumer {
+
+    @RetryableTopic(
+            attempts = "4", // Initial try + 3 progressive retries
+            backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000), // Exponential backoff
+            autoCreateTopics = "true",
+            topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_DELAY_VALUE,
+            exclude = {IllegalArgumentException.class} // Don't retry validation errors
+    )
+    @KafkaListener(topics = "invoices.v1", groupId = "accounting-group")
+    public void processInvoice(String invoiceJson) {
+        log.info("Consuming invoice: {}", invoiceJson);
+        if (invoiceJson.contains("TRANSIENT_GATEWAY_TIMEOUT")) {
+            throw new IllegalStateException("Payment provider network timed out!");
+        }
+        // Normal processing...
+    }
+
+    // Handles messages that fail all retry attempts
+    @DltHandler
+    public void handleDeadLetterMessage(
+            String failedPayload,
+            @Header(KafkaHeaders.ORIGINAL_TOPIC) String originalTopic,
+            @Header(KafkaHeaders.ORIGINAL_OFFSET) long originalOffset,
+            @Header(KafkaHeaders.EXCEPTION_MESSAGE) String errorMsg) {
+
+        log.error("CRITICAL: Message permanently failed all retries and routed to DLT! " +
+                  "OriginalTopic='{}', Offset={}, Error='{}', Payload='{}'",
+                originalTopic, originalOffset, errorMsg, failedPayload);
+
+        // Persist to database table for manual operational review
+        saveToDeadLetterStore(originalTopic, originalOffset, failedPayload, errorMsg);
+    }
+
+    private void saveToDeadLetterStore(String topic, long offset, String payload, String error) {}
+}
+```
+
+---
+
+### Approach 4: Poison Pill Defense via `ErrorHandlingDeserializer`
+
+#### Scenario
+A producer accidentally publishes malformed JSON or corrupted bytes. A standard deserializer throws a `DeserializationException` during `.poll()`, preventing the message from ever reaching the listener method and causing an infinite crash loop.
+
+#### Use-Case
+Mandatory configuration for all production Kafka consumers.
+
+#### Benefits Over Others
+- **Eliminates Consumer Crash Loops:** Catches serialization errors, wraps them in a failure record, and passes them to the error handler to move the partition offset forward.
+
+---
+
+## 4. Consumer Idempotency & Deduplication Strategies
+
+Because distributed message brokers provide **at-least-once delivery**, consumers will inevitably receive duplicate messages due to network timeouts, rebalances, and retries.
+
+```
+Incoming Duplicate Event (ID: "EVT-9021")
+                    │
+                    ▼
+           Check Idempotency Store
+                    │
+     ┌──────────────┴──────────────┐
+     ▼                             ▼
+Record Exists in Store       Record Missing
+(Duplicate detected!)        (First-time processing)
+     │                             │
+     ▼                             ▼
+Skip Business Logic & ACK    Execute Business Logic,
+                             Save ID in Store, then ACK
+```
+
+---
+
+### Approach 1: Relational Unique Constraint Idempotency Table
+
+#### Scenario
+Workflows involving relational database mutations where deduplication and business state changes must succeed or fail together atomically.
+
+#### Use-Case
+Financial ledgers, order creation, and balance updates where duplicate events must never be processed.
+
+#### Benefits Over Others
+- **ACID Atomicity:** The idempotency record is inserted within the **same local database transaction** as the business mutation.
+- **Zero Race Conditions:** The database unique constraint natively rejects concurrent duplicate deliveries.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.messaging.idempotency.db;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+
+@Entity
+@Table(name = "processed_messages")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class ProcessedMessageRecord {
+
+    @Id
+    @Column(name = "message_id", length = 64)
+    private String messageId;
+
+    @Column(name = "processed_at", nullable = false)
+    private Instant processedAt;
+}
+
+@Service
+@RequiredArgsConstructor
+public class IdempotentOrderConsumer {
+
+    private final EntityManager entityManager;
+
+    @Transactional
+    public boolean processOrderOnce(String eventId, String orderId, double amount) {
+        try {
+            // Attempt to insert idempotency record.
+            // If eventId was already processed, the database throws DataIntegrityViolationException!
+            ProcessedMessageRecord record = new ProcessedMessageRecord(eventId, Instant.now());
+            entityManager.persist(record);
+            entityManager.flush(); // Force immediate constraint check
+
+            // Business logic executes ONLY if insertion succeeded
+            executeOrderCreation(orderId, amount);
+            return true;
+
+        } catch (DataIntegrityViolationException ex) {
+            // Duplicate detected! Suppress error, log warning, and return cleanly
+            return false;
+        }
+    }
+
+    private void executeOrderCreation(String orderId, double amount) {}
+}
+```
+
+---
+
+### Approach 2: Distributed In-Memory Cache (Redis Atomic Key + TTL)
+
+#### Scenario
+High-throughput systems (10,000 events/sec) where querying a relational database on every event would saturate the database connection pool.
+
+#### Use-Case
+Notification dispatch, analytics event aggregation, and temporary deduplication windows (e.g., deduplicating within 24 hours).
+
+#### Benefits Over Others
+- **Sub-Millisecond Check:** Uses Redis `SET key value NX EX seconds` for an atomic "set if not exists" operation.
+- **Automatic Expiration:** Redis keys expire automatically after the TTL window, keeping memory usage bounded.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.messaging.idempotency.redis;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
+
+import java.time.Duration;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class RedisDeduplicationService {
+
+    private final StringRedisTemplate redisTemplate;
+
+    public boolean acquireIdempotencyLock(String messageId, Duration deduplicationWindow) {
+        String key = "idempotency:" + messageId;
+
+        // Atomically executes: SET key "PROCESSED" NX EX <seconds>
+        Boolean isFirstDelivery = redisTemplate.opsForValue()
+                .setIfAbsent(key, "LOCKED", deduplicationWindow);
+
+        if (Boolean.TRUE.equals(isFirstDelivery)) {
+            log.info("MessageId '{}' is unique. Acquired processing lock.", messageId);
+            return true;
+        } else {
+            log.warn("Duplicate messageId '{}' detected! Skipping processing.", messageId);
+            return false;
         }
     }
 }
 ```
 
-### 3.6 Dead Letter Exchanges (DLX) in RabbitMQ
+---
 
-To handle failed messages in RabbitMQ, we configure the primary queue to forward rejected messages to a Dead Letter Exchange.
+### Approach 3: Deterministic Domain State Machine Guard
 
-```java
-@Bean
-public DirectExchange deadLetterExchange() {
-    return new DirectExchange("dlx.exchange");
-}
+#### Scenario
+Domain entities with defined lifecycle states (e.g., `CREATED` -> `PAID` -> `SHIPPED` -> `DELIVERED`).
 
-@Bean
-public Queue deadLetterQueue() {
-    return new Queue("dlx.queue");
-}
+#### Use-Case
+Checking the entity's current state before applying a transition. If an `OrderPaidEvent` arrives for an order that is already `PAID`, the consumer skips processing cleanly.
 
-@Bean
-public Binding dlxBinding() {
-    return BindingBuilder.bind(deadLetterQueue()).to(deadLetterExchange()).with("dlx.routing.key");
-}
-
-@Bean
-public Queue inventoryQueue() {
-    return QueueBuilder.durable("inventory.queue")
-            .withArgument("x-dead-letter-exchange", "dlx.exchange")
-            .withArgument("x-dead-letter-routing-key", "dlx.routing.key")
-            .build();
-}
-```
-Now, if a consumer calls `channel.basicReject(deliveryTag, false)`, the message is automatically routed to `dlx.queue`.
+#### Benefits Over Others
+- **Zero Additional Tables or Caches:** Operates entirely on the domain entity's existing lifecycle fields.
 
 ---
 
-## 4. Distributed Patterns in Messaging
+## 5. Transactional Synchronization & Dual-Write Prevention
 
-### 4.1 The Dual-Write Problem
-A classic microservices problem: You need to save an entity to the database and publish an event to Kafka.
-```java
+The dual-write problem occurs when an application must update a database and publish a message to a broker. If either step fails after the other succeeds, the system becomes inconsistent.
+
+```
+❌ The Dual-Write Problem:
 @Transactional
 public void createOrder(Order order) {
-    orderRepository.save(order); // Write 1
-    kafkaTemplate.send("orders", order); // Write 2
+    orderRepo.save(order);      // Step 1: Database Commit
+    kafkaTemplate.send(event);  // Step 2: Message Send
 }
-```
-**The Problem**: 
-- If the DB commit succeeds but Kafka is down, the system is inconsistent.
-- If Kafka send succeeds, but the DB commit rolls back (e.g., constraint violation), the system is inconsistent (consumers act on phantom data).
-You cannot use standard `@Transactional` to span a database and a Kafka cluster (2PC/XA is too slow and not supported cleanly by Kafka).
-
-### 4.2 The Transactional Outbox Pattern (Crucial for Interviews)
-To solve the dual-write problem, we use the **Outbox Pattern**.
-Instead of sending to Kafka directly, we write the event to an "outbox" table in the *same database transaction* as the business entity. A separate background process reads the outbox table and publishes to Kafka.
-
-**Step 1: Entity and Outbox Model**
-```java
-@Entity
-public class Order {
-    @Id private Long id;
-    private String status;
-}
-
-@Entity
-public class OutboxEvent {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    private String aggregateType;
-    private String aggregateId;
-    private String eventType;
-    private String payload; // JSON
-    private boolean processed;
-}
+// Failure Mode 1: DB commits, but Kafka broker is down -> Event is lost forever!
+// Failure Mode 2: Kafka send succeeds, but DB transaction rolls back -> Phantom event published!
 ```
 
-**Step 2: Save both in one transaction**
+---
+
+### Approach 1: Transactional Outbox Pattern with Debezium CDC
+
+#### Scenario
+Mission-critical systems requiring guaranteed at-least-once message delivery without dual-write inconsistencies.
+
+#### Use-Case
+The industry-standard architectural solution for reliable event publishing.
+
+#### Benefits Over Others
+- **Guaranteed Consistency:** Writes the business entity and an outbox event record within the **same local database transaction**.
+- **Non-Blocking CDC Extraction:** Debezium reads the database transaction log directly, streaming events to Kafka without application polling overhead.
+
+#### Production-Grade Code Example
+
 ```java
+package com.example.messaging.outbox;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
 @Service
-public class OrderService {
+@RequiredArgsConstructor
+public class AtomicOrderService {
+
+    private final EntityManager entityManager;
+    private final ObjectMapper objectMapper;
+
     @Transactional
-    public void createOrder(OrderRequest request) {
-        Order order = new Order(request.getId(), "CREATED");
-        orderRepository.save(order); // Business data
-        
-        OutboxEvent event = new OutboxEvent(
-            "ORDER", order.getId().toString(), "OrderCreated", 
-            objectMapper.writeValueAsString(order)
-        );
-        outboxRepository.save(event); // Event data
+    public String placeOrder(String customerId, double total) throws Exception {
+        String orderId = UUID.randomUUID().toString();
+
+        // 1. Mutate business state
+        entityManager.createNativeQuery(
+                "INSERT INTO orders (id, customer_id, total_amount) VALUES (?, ?, ?)")
+                .setParameter(1, orderId)
+                .setParameter(2, customerId)
+                .setParameter(3, total)
+                .executeUpdate();
+
+        // 2. Persist outbox event in the SAME database transaction
+        String payload = objectMapper.writeValueAsString(Map.of(
+                "orderId", orderId,
+                "customerId", customerId,
+                "totalAmount", total
+        ));
+
+        entityManager.createNativeQuery(
+                "INSERT INTO outbox_table (id, aggregate_type, aggregate_id, event_type, payload, created_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?)")
+                .setParameter(1, UUID.randomUUID().toString())
+                .setParameter(2, "Order")
+                .setParameter(3, orderId)
+                .setParameter(4, "ORDER_CREATED")
+                .setParameter(5, payload)
+                .setParameter(6, Instant.now())
+                .executeUpdate();
+
+        // Debezium CDC captures this row from the database WAL and streams it to Kafka!
+        return orderId;
     }
 }
 ```
 
-**Step 3: Background Publisher (Polling or CDC)**
+---
+
+### Approach 2: `@TransactionalEventListener(phase = AFTER_COMMIT)`
+
+#### Scenario
+Simpler architectures without CDC infrastructure (Debezium) where message publication must happen **only if** the database transaction successfully commits.
+
+#### Use-Case
+Publishing events after database transactions without risking phantom events if the transaction rolls back.
+
+#### Benefits Over Others
+- **Built Into Spring Framework:** Requires zero external tools or outbox tables.
+- **Prevents Phantom Events:** The event listener triggers only after the database transaction successfully commits.
+
+#### Trade-offs & Limitations
+- If the application crashes or the broker is down during the `AFTER_COMMIT` execution, the event can be lost. Use the Transactional Outbox pattern if strict guaranteed delivery is required.
+
+#### Production-Grade Code Example
+
 ```java
-@Component
-public class OutboxRelay {
-    
-    @Scheduled(fixedDelay = 1000)
-    public void relayEvents() {
-        List<OutboxEvent> pending = outboxRepository.findByProcessedFalse();
-        for (OutboxEvent event : pending) {
-            kafkaTemplate.send("orders", event.getAggregateId(), event.getPayload());
-            event.setProcessed(true);
-            outboxRepository.save(event);
-        }
-    }
-}
-```
-> [!NOTE]
-> Polling works for small scale. For large scale, use **Change Data Capture (CDC)** tools like **Debezium**, which read the database transaction log (e.g., MySQL binlog, Postgres WAL) and stream events directly to Kafka with zero polling overhead.
+package com.example.messaging.eventlistener;
 
-### 4.3 Saga Pattern (Choreography vs Orchestration)
-Since distributed transactions (XA) lock resources and scale poorly, the Saga pattern is used for distributed workflows (e.g., Order -> Payment -> Inventory).
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
-- **Choreography**: Each service listens to events and publishes new events. No central coordinator. (Good for simple workflows, hard to trace).
-- **Orchestration**: A central service (Orchestrator) commands other services and handles state. (Better for complex workflows, avoids cyclic dependencies).
+public record OrderCommittedEvent(String orderId, double amount) {}
 
-### 4.4 Idempotency in Consumers
-Because networks are unreliable, message brokers guarantee **at-least-once delivery**. This means your consumer *will* receive duplicate messages. Your consumer MUST be **idempotent** (processing the same message 1 time or 100 times yields the exact same final state).
-
-**Implementation via Database Idempotency Key:**
-```java
 @Service
-public class PaymentConsumer {
-    
+@RequiredArgsConstructor
+@Slf4j
+public class OrderServiceWithSpringEvent {
+
+    private final ApplicationEventPublisher eventPublisher;
+
     @Transactional
-    @KafkaListener(topics = "payments")
-    public void processPayment(PaymentEvent event) {
-        // 1. Check if event was already processed
-        if (processedEventRepository.existsById(event.getEventId())) {
-            log.info("Duplicate message ignored: {}", event.getEventId());
-            return; 
-        }
-        
-        // 2. Do business logic
-        accountService.deductBalance(event.getUserId(), event.getAmount());
-        
-        // 3. Save event ID to idempotency table
-        processedEventRepository.save(new ProcessedEvent(event.getEventId()));
+    public void createOrder(String orderId, double amount) {
+        log.info("Persisting order '{}' to database", orderId);
+        // Database write...
+
+        // Publish internal Spring event within active transaction
+        eventPublisher.publishEvent(new OrderCommittedEvent(orderId, amount));
     }
 }
-```
 
----
-
-## 5. ActiveMQ / JMS (Brief)
-
-While Kafka and RabbitMQ dominate microservices, legacy enterprise applications often use JMS (Java Message Service) via Apache ActiveMQ or Artemis.
-
-- **JmsTemplate**: Spring's synchronous and helper class for JMS.
-- **@JmsListener**: Marks a method to asynchronously receive messages.
-
-```java
 @Component
-public class JmsConsumer {
-    @JmsListener(destination = "invoice.queue")
-    public void receive(String message) {
-        System.out.println("Received: " + message);
-    }
-}
-```
-*Note: JMS strictly distinguishes between Queues (Point-to-Point) and Topics (Pub/Sub) at the API level.*
+@RequiredArgsConstructor
+@Slf4j
+class OrderPostCommitKafkaPublisher {
 
----
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
-## 6. Testing Messaging
-
-Messaging makes testing asynchronous. You must test if messages are actually sent/received without requiring an external broker to be manually started.
-
-### 6.1 Testcontainers
-Testcontainers spins up actual Docker containers of Kafka/RabbitMQ during integration tests.
-
-```java
-@SpringBootTest
-@Testcontainers
-public class KafkaIntegrationTest {
-
-    @Container
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.3.0"));
-
-    @DynamicPropertySource
-    static void overrideProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-    }
-
-    @Autowired
-    private KafkaTemplate<String, String> kafkaTemplate;
-
-    @Test
-    void testMessageFlow() {
-        kafkaTemplate.send("test-topic", "test-data");
-        // Use Awaitility to wait for async processing
-        Awaitility.await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
-            // assert database state changed by consumer
-        });
+    // Executes ONLY AFTER the database transaction successfully commits!
+    // If the database transaction rolls back, this method NEVER fires!
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onOrderCommitted(OrderCommittedEvent event) {
+        log.info("Database transaction committed. Now safely dispatching to Kafka for order: {}", event.orderId());
+        kafkaTemplate.send("orders.v1", event.orderId(), event);
     }
 }
 ```
 
-### 6.2 Embedded Kafka
-Spring provides `@EmbeddedKafka`, an in-memory broker. It's faster than Testcontainers but less identical to production.
-```java
-@SpringBootTest
-@EmbeddedKafka(partitions = 1, brokerProperties = { "listeners=PLAINTEXT://localhost:9092", "port=9092" })
-public class EmbeddedKafkaTest { ... }
+---
+
+### Approach 3: Synchronized Kafka Transactions (`KafkaTransactionManager`)
+
+#### Scenario
+Kafka Streams applications or "read-process-write" workflows (consuming from Kafka Topic A and publishing to Kafka Topic B) requiring exactly-once processing (EOS).
+
+#### Use-Case
+Kafka-to-Kafka pipelines where consuming an inbound event and producing outbound events must commit atomically.
+
+---
+
+## 6. Message Ordering & Concurrency Partitioning
+
+- **Kafka Ordering:** Guaranteed **strictly within a single partition**. Messages with the same key hash to the same partition and are processed in FIFO order. To scale consumption, increase the number of partitions.
+- **RabbitMQ Ordering:** Guaranteed on a single queue with a **single active consumer**. Multiple concurrent consumers on the same queue will process messages out of order due to varying thread execution times.
+
+---
+
+## 7. Comprehensive Configuration Reference
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: kafka-broker-1:9092,kafka-broker-2:9092
+    producer:
+      acks: all                         # Wait for all in-sync replicas to acknowledge
+      retries: 5
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: core-business-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false         # CRITICAL: Disable auto-commit in production!
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: "com.example.*"
+    listener:
+      ack-mode: manual_immediate        # Commit offset immediately when acknowledge() is called
+      concurrency: 3                    # Number of consumer threads
+
+  rabbitmq:
+    host: rabbitmq.internal.vpc
+    port: 5672
+    username: app_user
+    password: ${RABBIT_PASSWORD}
+    listener:
+      simple:
+        acknowledge-mode: manual        # Manual basicAck
+        prefetch: 10                    # Flow control limit
 ```
 
 ---
 
-## 7. ⚠️ Interview Traps & Gotchas
+## 8. ⚠️ Interview Traps & Production Gotchas
 
-### Trap 1: Blocking the Consumer Thread
-**Gotcha**: Calling `Thread.sleep()` or making heavy synchronous HTTP calls inside a `@KafkaListener` blocks the consumer thread. If you don't poll the broker within `max.poll.interval.ms`, Kafka assumes the consumer is dead, triggers a partition rebalance, and the message is re-delivered, creating an infinite loop of failures.
-**Solution**: Use non-blocking retries (RetryTopic), asynchronous processing, or increase `max.poll.interval.ms` carefully.
+### Trap 1: Blocking the Kafka Consumer Polling Thread
 
-### Trap 2: Committing Offsets Before Processing Finishes
-**Gotcha**: Using `enable-auto-commit=true`. The consumer fetches a batch, Kafka auto-commits. The application crashes mid-batch. Result: Data Loss.
-**Solution**: Always use `AckMode.MANUAL_IMMEDIATE` and only call `.acknowledge()` at the absolute end of the `try` block.
-
-### Trap 3: Poison Pill Messages
-**Gotcha**: A producer sends invalid JSON. The consumer throws a DeserializationException before reaching your `@KafkaListener`. The offset is not committed. The consumer fetches the exact same bad message again infinitely.
-**Solution**: Use `ErrorHandlingDeserializer` in Spring Kafka, which catches the error and wraps it, allowing the consumer to skip or route to a DLT.
-
-### Trap 4: @Transactional and KafkaTemplate
-**Gotcha**: A candidate writes:
-```java
-@Transactional
-public void doWork() {
-    kafkaTemplate.send("topic", msg);
-    if(true) throw new RuntimeException("DB fails");
-}
-```
-**Trap Question**: Does the Kafka message get rolled back?
-**Answer**: By default, NO! Kafka sends the message immediately over the network. If the DB rolls back, the Kafka message is already gone.
-To fix this, you must enable **Kafka Transactions** and configure the `KafkaTransactionManager` to synchronize with the JPA Transaction manager, OR use the Transactional Outbox pattern (which is vastly preferred).
-
-### Trap 5: Duplicate Message Processing
-**Gotcha**: Assuming a message is processed only once. Network timeouts during acknowledgment can cause brokers to resend messages.
-**Solution**: Always design consumers to be idempotent. Use unique event IDs and check against a database/cache before processing.
+> [!CAUTION]
+> If a `@KafkaListener` method executes long-running synchronous HTTP calls or blocks longer than `max.poll.interval.ms` (default 5 minutes), the Kafka broker assumes the consumer is dead. The broker evicts the consumer and triggers a partition rebalance, causing the same batch to be delivered to another consumer in an infinite rebalance loop.
 
 ---
 
-## 8. 🔍 Deep Dive: Internal Mechanics
+### Trap 2: Poison Pill Infinite Loop Without `ErrorHandlingDeserializer`
 
-### How `@KafkaListener` Works Under the Hood
-When Spring boots up, it scans for `@KafkaListener` annotations. For each annotation, the `KafkaListenerAnnotationBeanPostProcessor` creates a `MessageListenerContainer` (usually `ConcurrentMessageListenerContainer`).
-1. The container spins up `N` threads (defined by the `concurrency` property).
-2. Each thread creates a `KafkaConsumer` and calls `.poll()`.
-3. When messages arrive, they are dispatched to your annotated method via reflection.
-4. If `AckMode` is manual, Spring provides the `Acknowledgment` object, which holds a reference to the `Consumer` to allow calling `commitSync()` or `commitAsync()`.
-
-### RabbitMQ Prefetch vs Kafka Polling
-- **RabbitMQ Prefetch**: Dictates how many unacknowledged messages the broker will push to a consumer simultaneously. If prefetch is 10, the broker pushes 10 messages and waits for acks before pushing more. 
-- **Kafka Polling**: The consumer actively pulls messages. `max.poll.records` dictates the maximum size of the batch returned in a single `.poll()` call.
+If a producer sends an unparseable payload, a standard deserializer throws an exception before reaching your listener code. The offset is never committed, and the consumer polls the identical bad message again on the next iteration. Always configure `ErrorHandlingDeserializer`.
 
 ---
 
-## 9. 📝 Summary & Key Takeaways
+### Trap 3: RabbitMQ `basicReject(requeue = true)` Loop
 
-1. **Decoupling**: Message brokers decouple microservices temporally and geographically.
-2. **Kafka vs RabbitMQ**: Kafka is an append-only log suited for high-throughput event streaming and replayability. RabbitMQ is an AMQP broker suited for complex routing and traditional point-to-point queues.
-3. **Dual-Write Problem**: Solved cleanly via the Transactional Outbox Pattern.
-4. **Idempotency**: Message brokers guarantee at-least-once delivery; your application must handle duplicates gracefully.
-5. **Spring Abstractions**: Spring unifies messaging with `XXXTemplate` for producers and `@XXXListener` for consumers, drastically reducing boilerplate.
+Calling `channel.basicReject(deliveryTag, true)` on a poison pill message immediately re-queues it at the head of the queue, creating an infinite processing loop that consumes 100% CPU. Always route permanently failing messages to a Dead Letter Exchange (`basicReject(deliveryTag, false)`).
 
 ---
 
-## 10. ❓ Practice Questions
+## 9. 📝 Architectural Comparison Matrix
 
-1. Explain the difference between `Topic` in Kafka and `Exchange` in RabbitMQ.
-2. How would you implement the Transactional Outbox pattern if you couldn't use a cron job to poll the database?
-3. Walk through the exact mechanism of a Poison Pill infinite loop in Kafka and how Spring's `ErrorHandlingDeserializer` resolves it.
-4. What happens if a Kafka consumer takes longer than `max.poll.interval.ms` to process a message? How does this impact the consumer group?
-5. Design an idempotent consumer for an `OrderPaidEvent`. What database tables and constraints would you need?
+| Dimension | Apache Kafka | RabbitMQ | Spring In-Memory Events |
+|---|---|---|---|
+| **Architecture** | Distributed append-only log | Smart broker, dumb consumer queue | Single-process JVM memory |
+| **Message Ordering** | Strict per partition key | Strict only with 1 consumer | In-memory synchronous or async |
+| **Throughput** | Millions of events/sec | Tens of thousands of events/sec | Sub-microsecond memory dispatch |
+| **Message Retention** | Persistent (Configurable retention) | Transient (Deleted on ACK) | Ephemeral (Lost on JVM stop) |
+| **Routing Flexibility** | Topic/Partition key only | Advanced (Direct, Topic, Fanout, Headers) | Strong Java event typing |
+| **Best Used For** | Event streaming, audit logs, CDC | Task queues, complex routing | Decoupled modular monoliths |
+
+---
+
+## 10. ❓ Practice Questions & Real-World Scenarios
+
+1. **How do you prevent the dual-write problem when persisting to a database and publishing to Kafka?**
+   - *Answer:* Use the Transactional Outbox Pattern: save both the business entity and an outbox event in the same local database transaction. A separate CDC engine (Debezium) reads the transaction log and publishes to Kafka. Alternatively, use `@TransactionalEventListener(phase = AFTER_COMMIT)` to ensure messages are dispatched only after successful commits.
+
+2. **Why should you never use `enable-auto-commit = true` in production Kafka consumers?**
+   - *Answer:* Auto-commit periodically commits offsets in the background regardless of whether message processing has finished. If the application crashes mid-processing, the offset has already moved forward, resulting in silent message loss.
+
+3. **How does Kafka ensure strict message ordering while still scaling horizontally?**
+   - *Answer:* Kafka guarantees ordering within a partition. Messages sharing the same partition key hash to the same partition, guaranteeing strict FIFO order per key. Horizontal scaling is achieved by increasing partition counts and adding consumers to the consumer group.

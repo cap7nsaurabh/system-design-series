@@ -1,226 +1,207 @@
-# Module 15: Observability, Monitoring & Actuator in Spring Boot
+# 15 — Observability, Monitoring & Actuator in Spring Boot 3.x
 
-Modern microservices architectures demand robust visibility. When a system spans dozens of services, thousands of instances, and handles millions of requests, answering the simple question "Why is this request slow?" becomes incredibly difficult without the right tools.
-
-This module provides a comprehensive deep dive into **Observability in Spring Boot**. We will cover the "Three Pillars of Observability": **Metrics, Logs, and Traces**, and how Spring Boot Ecosystem (Actuator, Micrometer, Micrometer Tracing) seamlessly integrates with industry-standard tools like Prometheus, Grafana, OpenTelemetry, Zipkin, and the ELK stack.
+> **Module Goal:** Master modern enterprise observability in Spring Boot 3.x (Java 17/21). From securing Actuator endpoints and multi-phase Kubernetes lifecycle probes, to unified metrics and tracing via `ObservationRegistry`, Prometheus alerting rules, OpenTelemetry bridges, structured JSON logging with MDC trace correlation, and high-cardinality hazard mitigation.
 
 ---
 
-## 1. The Three Pillars of Observability
+## Table of Contents
 
-Before diving into code, let's establish the terminology:
-
-1.  **Metrics**: Aggregated data over a period of time. E.g., "We received 500 requests per second with an average latency of 45ms." Metrics are cheap to store and alert on, but lack granular details of a specific request.
-2.  **Logs**: Discrete, immutable records of events that happened over time. E.g., "User 123 failed to log in because of invalid credentials." Logs are detailed but can be expensive to store at high volume.
-3.  **Distributed Traces**: A representation of a single request's journey across multiple services. E.g., "Request A took 200ms total: 50ms in Service X, 100ms in Service Y (database query), and 50ms in Service Z."
-
-Spring Boot provides first-class support for all three.
+1. [Architectural Foundations: The Three Pillars of Observability](#1-architectural-foundations-the-three-pillars-of-observability)
+2. [Application Health & Readiness Assessment Approaches](#2-application-health--readiness-assessment-approaches)
+   - [Approach 1: Standard Synchronous `HealthIndicator`](#approach-1-standard-synchronous-healthindicator)
+   - [Approach 2: Reactive Non-Blocking `ReactiveHealthIndicator`](#approach-2-reactive-non-blocking-reactivehealthindicator)
+   - [Approach 3: Kubernetes Native Lifecycle Probes (`LivenessState` & `ReadinessState`)](#approach-3-kubernetes-native-lifecycle-probes-livenessstate--readinessstate)
+   - [Approach 4: Grouped Health Contributors (`CompositeHealthContributor`)](#approach-4-grouped-health-contributors-compositehealthcontributor)
+3. [Metrics Collection & Instrumentation Strategies](#3-metrics-collection--instrumentation-strategies)
+   - [Approach 1: Programmatic Instrumentation via `MeterRegistry`](#approach-1-programmatic-instrumentation-via-meterregistry)
+   - [Approach 2: Declarative AOP Method Instrumentation (`@Timed` & `@Counted`)](#approach-2-declarative-aop-method-instrumentation-timed--counted)
+   - [Approach 3: Spring Boot 3 Unified `ObservationRegistry` & `ObservationHandler`](#approach-3-spring-boot-3-unified-observationregistry--observationhandler)
+   - [Approach 4: Active Job Duration Tracking via `LongTaskTimer`](#approach-4-active-job-duration-tracking-via-longtasktimer)
+4. [Distributed Tracing & Context Propagation Approaches](#4-distributed-tracing--context-propagation-approaches)
+   - [Approach 1: OpenTelemetry Standard Bridge (`micrometer-tracing-bridge-otel`)](#approach-1-opentelemetry-standard-bridge-micrometer-tracing-bridge-otel)
+   - [Approach 2: Brave / Zipkin Bridge (`micrometer-tracing-bridge-brave`)](#approach-2-brave--zipkin-bridge-micrometer-tracing-bridge-brave)
+   - [Approach 3: Programmatic Spans & Distributed Baggage Propagation](#approach-3-programmatic-spans--distributed-baggage-propagation)
+   - [Approach 4: ThreadContext Propagation Across `@Async` & Reactive Streams](#approach-4-threadcontext-propagation-across-async--reactive-streams)
+5. [Structured Logging & Runtime Diagnostics](#5-structured-logging--runtime-diagnostics)
+   - [Approach 1: Structured JSON Logging with MDC Correlation](#approach-1-structured-json-logging-with-mdc-correlation)
+   - [Approach 2: Dynamic Runtime Log Level Mutation via Actuator](#approach-2-dynamic-runtime-log-level-mutation-via-actuator)
+6. [Prometheus AlertManager & Grafana Dashboard Architectures](#6-prometheus-alertmanager--grafana-dashboard-architectures)
+7. [Comprehensive Configuration Reference](#7-comprehensive-configuration-reference)
+8. [⚠️ Interview Traps & Production Gotchas](#️-interview-traps--production-gotchas)
+9. [📝 Architectural Comparison Matrix](#-architectural-comparison-matrix)
+10. [❓ Practice Questions & Real-World Scenarios](#-practice-questions--real-world-scenarios)
 
 ---
 
-## 2. Spring Boot Actuator: The Command Center
+## 1. Architectural Foundations: The Three Pillars of Observability
 
-Spring Boot Actuator brings production-ready features to your application. It provides built-in endpoints to monitor and manage your application, giving you insights into application health, metrics, environment variables, thread dumps, and more.
+In distributed cloud architectures, answering *"Why did order #9821 take 4.8 seconds?"* requires three correlated telemetry streams:
 
-### 2.1. Setup and Enabling Endpoints
-
-To use Actuator, add the dependency to your `pom.xml`:
-
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-actuator</artifactId>
-</dependency>
+```
+                           The Observability Triad
+                                     │
+           ┌─────────────────────────┼─────────────────────────┐
+           ▼                         ▼                         ▼
+        Metrics                    Logs                     Traces
+   - Numeric aggregations    - Discrete, immutable     - Request journey DAG
+   - Low storage footprint     event statements          across service hops
+   - Fast time-series alerts - High detail/debugging   - Identifies bottlenecks
+   - "500 errors spiked"     - "NullPointer in svc B"  - "DB lock held for 4s"
+           │                         │                         │
+           └─────────────────────────┼─────────────────────────┘
+                                     ▼
+                  Unified Correlation via Trace ID & MDC
 ```
 
-By default, only `/health` and `/info` are exposed over HTTP. To expose more endpoints, configure your `application.yml`:
+In Spring Boot 3.x, **Micrometer 1.11+** and the new **Observation API** unify metrics and distributed traces into a single instrumentation call.
 
-```yaml
-management:
-  endpoints:
-    web:
-      exposure:
-        # Expose all endpoints EXCEPT env and threaddump (as an example)
-        # Use "*" to expose all, but be careful!
-        include: "*"
-        exclude: "env,threaddump"
-  endpoint:
-    health:
-      show-details: always # Shows detailed health of database, disk space, etc.
-      show-components: always
-```
+---
 
-> [!CAUTION]
-> Never expose `management.endpoints.web.exposure.include: "*"` on a public-facing interface without authentication. Endpoints like `/env` can leak database passwords or API keys, and `/heapdump` can leak entire memory contents, including user PII.
+## 2. Application Health & Readiness Assessment Approaches
 
-### 2.2. Key Actuator Endpoints
+Health endpoints indicate whether an application container is functioning, whether its downstream dependencies are operational, and whether Kubernetes should route ingress traffic to the pod.
 
-| Endpoint | Description | Production Use Case |
-| :--- | :--- | :--- |
-| `/actuator/health` | Application health information. | Used by Load Balancers and Kubernetes probes to know if traffic should be routed here. |
-| `/actuator/info` | Arbitrary application info. | Displaying git commit hash, build version, or team ownership. |
-| `/actuator/metrics` | Exposes Micrometer metrics. | Querying specific JVM or custom metrics directly. |
-| `/actuator/env` | Exposes properties from `Environment`. | Debugging why a property wasn't picked up (e.g., checking if a profile is active). |
-| `/actuator/threaddump` | Performs a thread dump. | Debugging deadlocks or threads stuck on I/O. |
-| `/actuator/heapdump` | Downloads an `hprof` heap dump file. | Investigating memory leaks offline via Eclipse MAT. |
-| `/actuator/loggers` | Shows and modifies log levels. | Dynamically enabling `DEBUG` logs for a specific package without restarting the app. |
-| `/actuator/mappings` | Shows all `@RequestMapping` paths. | Discovering what REST endpoints exist on the application. |
+---
 
-### 2.3. Security Implications
+### Approach 1: Standard Synchronous `HealthIndicator`
 
-Because Actuator endpoints reveal sensitive internal details, they **must** be secured. Often, companies expose actuator on a completely different HTTP port that is only accessible inside the private VPC.
+#### Scenario
+Traditional Spring MVC applications with blocking relational database (JDBC/HikariCP) or cache dependencies that must report health status to internal dashboards or monitoring scrapers.
 
-```yaml
-management:
-  server:
-    port: 8081 # Actuator runs on 8081, main app on 8080
-    address: 127.0.0.1 # Bind only to localhost (or internal network interface)
-```
+#### Use-Case
+Verifying connectivity to critical synchronous backing services (payment gateways, legacy SOAP services, LDAP) on an administrative `/actuator/health` endpoint.
 
-Alternatively, secure it using Spring Security:
+#### Benefits Over Others
+- **Simplicity:** Minimal boilerplate; simply return `Health.up()` or `Health.down()`.
+- **Automatic Aggregation:** Spring Boot aggregates all `HealthIndicator` beans into a single top-level health status (`UP`, `DOWN`, `OUT_OF_SERVICE`).
+
+#### Production-Grade Code Example
 
 ```java
-import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.config.Customizer;
+package com.example.observability.health.standard;
 
-@Configuration
-public class ActuatorSecurityConfig {
-
-    @Bean
-    public SecurityFilterChain actuatorSecurity(HttpSecurity http) throws Exception {
-        http
-            .securityMatcher(EndpointRequest.toAnyEndpoint())
-            .authorizeHttpRequests(authorize -> authorize
-                // Allow /health and /info to anyone (Load Balancer)
-                .requestMatchers(EndpointRequest.to("health", "info")).permitAll()
-                // Require ADMIN role for all other actuator endpoints
-                .anyRequest().hasRole("ADMIN")
-            )
-            .httpBasic(Customizer.withDefaults()); // Basic Auth for scraping/admin
-        
-        return http.build();
-    }
-}
-```
-
-### 2.4. Custom HealthIndicators
-
-The `/health` endpoint automatically aggregates the status of all `HealthIndicator` beans. Spring Boot provides auto-configured indicators for DataSources, Redis, MongoDB, RabbitMQ, disk space, etc.
-
-You can write a custom `HealthIndicator` to check external dependencies (e.g., a third-party API your service relies on).
-
-```java
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClient;
+
+import java.time.Duration;
 
 @Component("paymentGatewayHealth")
+@RequiredArgsConstructor
+@Slf4j
 public class PaymentGatewayHealthIndicator implements HealthIndicator {
 
-    private final RestTemplate restTemplate;
-
-    public PaymentGatewayHealthIndicator(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
-    }
+    private final RestClient restClient;
 
     @Override
     public Health health() {
+        long start = System.currentTimeMillis();
         try {
-            // Ping the external service
-            String status = restTemplate.getForObject("https://api.paymentgateway.com/ping", String.class);
-            if ("OK".equalsIgnoreCase(status)) {
+            // Lightweight ping with short timeout
+            String status = restClient.get()
+                    .uri("https://api.paymentgateway.internal/health/ping")
+                    .retrieve()
+                    .body(String.class);
+
+            long latencyMs = System.currentTimeMillis() - start;
+
+            if ("PONG".equalsIgnoreCase(status)) {
                 return Health.up()
-                             .withDetail("service", "PaymentGateway")
-                             .withDetail("latency", "45ms")
-                             .build();
+                        .withDetail("provider", "Stripe-Private-Link")
+                        .withDetail("latencyMs", latencyMs)
+                        .withDetail("status", "OPERATIONAL")
+                        .build();
             } else {
                 return Health.down()
-                             .withDetail("service", "PaymentGateway")
-                             .withDetail("error", "Received non-OK status: " + status)
-                             .build();
+                        .withDetail("error", "Unexpected ping response: " + status)
+                        .withDetail("latencyMs", latencyMs)
+                        .build();
             }
-        } catch (RestClientException e) {
-            return Health.down(e)
-                         .withDetail("service", "PaymentGateway")
-                         .build();
+        } catch (Exception ex) {
+            log.warn("Payment gateway health probe failed: {}", ex.getMessage());
+            return Health.down(ex)
+                    .withDetail("provider", "Stripe-Private-Link")
+                    .withDetail("failureReason", ex.getMessage())
+                    .build();
         }
     }
 }
 ```
 
-### 2.5. Custom InfoContributors
+---
 
-The `/info` endpoint is great for displaying metadata. While you can add static info via `application.yml` under the `info.*` key, you can also inject dynamic info.
+### Approach 2: Reactive Non-Blocking `ReactiveHealthIndicator`
+
+#### Scenario
+High-concurrency Spring WebFlux microservices running on Project Reactor and Netty where health checks must never block event-loop worker threads.
+
+#### Use-Case
+Health checks for reactive drivers like R2DBC (reactive PostgreSQL/MySQL), Reactive Redis, or non-blocking HTTP endpoints.
+
+#### Benefits Over Others
+- **Zero Event-Loop Blocking:** Avoids freezing Netty threads with synchronous timeouts.
+- **Native Publisher Composition:** Returns `Mono<Health>` for seamless integration into reactive pipelines.
+
+#### Production-Grade Code Example
 
 ```java
-import org.springframework.boot.actuate.info.Info;
-import org.springframework.boot.actuate.info.InfoContributor;
-import org.springframework.stereotype.Component;
-import java.util.Map;
+package com.example.observability.health.reactive;
 
-@Component
-public class SystemInfoContributor implements InfoContributor {
+import lombok.RequiredArgsConstructor;
+import org.springframework.boot.actuate.health.Health;
+import org.springframework.boot.actuate.health.ReactiveHealthIndicator;
+import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
+import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
+
+import java.time.Duration;
+
+@Component("reactiveRedisHealth")
+@RequiredArgsConstructor
+public class ReactiveRedisHealthIndicator implements ReactiveHealthIndicator {
+
+    private final ReactiveRedisConnectionFactory connectionFactory;
 
     @Override
-    public void contribute(Info.Builder builder) {
-        builder.withDetail("system", Map.of(
-            "osName", System.getProperty("os.name"),
-            "javaVersion", System.getProperty("java.version"),
-            "activeThreads", Thread.activeCount()
-        ));
+    public Mono<Health> health() {
+        return connectionFactory.getReactiveConnection()
+                .ping()
+                .timeout(Duration.ofMillis(800))
+                .map(response -> Health.up()
+                        .withDetail("redisResponse", response)
+                        .withDetail("mode", "ReactiveCluster")
+                        .build())
+                .onErrorResume(ex -> Mono.just(Health.down(ex)
+                        .withDetail("error", "Redis reactive ping timed out or failed")
+                        .build()));
     }
 }
 ```
 
-### 2.6. Kubernetes Probes (Liveness and Readiness)
+---
 
-When running in Kubernetes, k8s needs to know two things:
-1.  **Liveness**: Is the container completely dead/deadlocked and needs to be restarted?
-2.  **Readiness**: Is the container done initializing and ready to receive HTTP traffic?
+### Approach 3: Kubernetes Native Lifecycle Probes (`LivenessState` & `ReadinessState`)
 
-Spring Boot Actuator integrates natively with K8s probes. If you run your app in K8s (or set `management.endpoint.health.probes.enabled=true`), Actuator automatically exposes `/actuator/health/liveness` and `/actuator/health/readiness`.
+#### Scenario
+Containerized microservices running in Kubernetes where container restarts (liveness) must be separated from traffic routing (readiness).
 
-- **Liveness** goes `DOWN` if `LivenessState.BROKEN` is published (e.g., critical internal failure).
-- **Readiness** is `DOWN` during startup, goes `UP` when `ApplicationReadyEvent` fires, and can go `DOWN` if the app is overloaded or gracefully shutting down.
+#### Use-Case
+Preventing restart loops when external dependencies go down. If the database crashes, the application is **not ready** (stop sending traffic), but it is still **alive** (do not restart the container).
 
-Example Kubernetes Deployment config utilizing these endpoints:
+#### Benefits Over Others
+- **Prevents Cascading Restart Storms:** Protects against restarting 100 pods simultaneously when a downstream database experiences a transient blip.
+- **Automated Graceful Shutdown:** Sets readiness to `REFUSING_TRAFFIC` during shutdown while existing requests finish processing.
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: order-service
-spec:
-  template:
-    spec:
-      containers:
-        - name: order-service
-          image: order-service:1.0.0
-          ports:
-            - containerPort: 8080
-          livenessProbe:
-            httpGet:
-              path: /actuator/health/liveness
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 5
-          readinessProbe:
-            httpGet:
-              path: /actuator/health/readiness
-              port: 8080
-            initialDelaySeconds: 15
-            periodSeconds: 5
-```
-
-You can programmatically change the state:
+#### Production-Grade Code Example
 
 ```java
+package com.example.observability.health.k8s;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.availability.AvailabilityChangeEvent;
 import org.springframework.boot.availability.LivenessState;
 import org.springframework.boot.availability.ReadinessState;
@@ -228,197 +209,384 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 @Service
-public class CircuitBreakerService {
+@RequiredArgsConstructor
+@Slf4j
+public class KubernetesLifecycleCoordinator {
 
     private final ApplicationEventPublisher eventPublisher;
 
-    public CircuitBreakerService(ApplicationEventPublisher eventPublisher) {
-        this.eventPublisher = eventPublisher;
+    public void onWarmupComplete() {
+        log.info("Application caches preloaded. Notifying Kubernetes to start routing ingress traffic.");
+        // Moves /actuator/health/readiness -> UP
+        AvailabilityChangeEvent.publish(eventPublisher, this, ReadinessState.ACCEPTING_TRAFFIC);
     }
 
-    public void onCriticalDatabaseFailure() {
-        // Tell Kubernetes we are no longer ready for traffic
-        AvailabilityChangeEvent.publish(this.eventPublisher, this, ReadinessState.REFUSING_TRAFFIC);
-        
-        // OR tell Kubernetes to kill and restart us
-        // AvailabilityChangeEvent.publish(this.eventPublisher, this, LivenessState.BROKEN);
+    public void onCriticalMemoryCorruption() {
+        log.error("Irrecoverable internal deadlock detected! Triggering Kubernetes pod restart.");
+        // Moves /actuator/health/liveness -> DOWN (Kubernetes restarts the pod)
+        AvailabilityChangeEvent.publish(eventPublisher, this, LivenessState.BROKEN);
+    }
+
+    public void onDatabaseUnavailable() {
+        log.warn("Database connection lost! Refusing incoming HTTP traffic but remaining alive.");
+        // Moves /actuator/health/readiness -> OUT_OF_SERVICE (Kubernetes removes pod from Service endpoints)
+        AvailabilityChangeEvent.publish(eventPublisher, this, ReadinessState.REFUSING_TRAFFIC);
     }
 }
 ```
 
 ---
 
-## 3. Metrics with Micrometer
+### Approach 4: Grouped Health Contributors (`CompositeHealthContributor`)
 
-### 3.1. What is Micrometer?
+#### Scenario
+Large enterprise applications with dozens of backing dependencies (relational database, Redis, S3, ERP, third-party payment gateways) where `/actuator/health` responses must be structured hierarchically.
 
-Micrometer is to metrics what SLF4J is to logging. It provides a vendor-neutral metrics collection facade. You instrument your code using Micrometer's API, and Spring Boot handles exporting those metrics to a backend of your choice (Prometheus, Datadog, New Relic, etc.).
+#### Use-Case
+Partitioning health indicators into logical groups so operators can query `/actuator/health/external-apis` or `/actuator/health/core-storage` separately.
 
-### 3.2. Core Metric Types
+#### Benefits Over Others
+- **Clean Health Domain Partitioning:** Keeps the health response organized.
+- **Targeted Monitoring:** Allows monitoring scrapers to target specific subsystem health groups.
 
-1.  **Counter**: Reports a single value that can only go up. (E.g., Number of orders processed).
-2.  **Timer**: Measures both the rate that a short-running event occurs and the distribution of its duration. (E.g., HTTP request latency).
-3.  **Gauge**: Shows the current value of something that can go up and down. (E.g., Active sessions, CPU usage, Collection size).
-4.  **DistributionSummary**: Tracks the statistical distribution of events. (E.g., The payload size of incoming requests).
-
-### 3.3. Instrumenting Code Programmatically
-
-You can inject `MeterRegistry` to create and update metrics manually:
+#### Production-Grade Code Example
 
 ```java
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
-import org.springframework.stereotype.Service;
-import java.util.concurrent.atomic.AtomicInteger;
-import jakarta.annotation.PostConstruct;
+package com.example.observability.health.composite;
 
-@Service
-public class OrderService {
+import org.springframework.boot.actuate.health.CompositeHealthContributor;
+import org.springframework.boot.actuate.health.HealthContributor;
+import org.springframework.boot.actuate.health.NamedContributor;
+import org.springframework.stereotype.Component;
 
-    private final Counter orderCounter;
-    private final Timer orderTimer;
-    private final AtomicInteger activeOrders;
+import java.util.Iterator;
+import java.util.Map;
 
-    public OrderService(MeterRegistry registry) {
-        // Counter
-        this.orderCounter = registry.counter("orders.processed.total", "type", "online");
-        
-        // Timer
-        this.orderTimer = registry.timer("orders.processing.time");
-        
-        // Gauge
-        this.activeOrders = registry.gauge("orders.active.current", new AtomicInteger(0));
+@Component("thirdPartySubsystems")
+public class ThirdPartySubsystemsCompositeHealthContributor implements CompositeHealthContributor {
+
+    private final Map<String, HealthContributor> contributors;
+
+    public ThirdPartySubsystemsCompositeHealthContributor(
+            PaymentGatewayHealthIndicator paymentHealth,
+            EmailDeliveryHealthIndicator emailHealth) {
+        this.contributors = Map.of(
+                "paymentGateway", paymentHealth,
+                "emailDelivery", emailHealth
+        );
     }
 
-    public void processOrder() {
-        activeOrders.incrementAndGet();
-        
-        orderTimer.record(() -> {
-            try {
-                // Simulate work
-                Thread.sleep(150);
-                orderCounter.increment();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } finally {
-                activeOrders.decrementAndGet();
-            }
-        });
+    @Override
+    public HealthContributor getContributor(String name) {
+        return contributors.get(name);
+    }
+
+    @Override
+    public Iterator<NamedContributor<HealthContributor>> iterator() {
+        return contributors.entrySet().stream()
+                .map(entry -> NamedContributor.of(entry.getKey(), entry.getValue()))
+                .iterator();
+    }
+}
+
+@Component
+class EmailDeliveryHealthIndicator implements org.springframework.boot.actuate.health.HealthIndicator {
+    @Override
+    public org.springframework.boot.actuate.health.Health health() {
+        return org.springframework.boot.actuate.health.Health.up().withDetail("smtp", "CONNECTED").build();
     }
 }
 ```
 
-### 3.4. The `@Timed` Annotation
+---
 
-For easier timer instrumentation on methods, you can use `@Timed`. Note that you MUST register a `TimedAspect` bean for this to work in Spring Boot.
+## 3. Metrics Collection & Instrumentation Strategies
+
+Measuring latency, error rates, and resource utilization requires selecting the right Micrometer metric type and avoiding the **high cardinality trap**.
+
+---
+
+### Approach 1: Programmatic Instrumentation via `MeterRegistry`
+
+#### Scenario
+Fine-grained business metric tracking (e.g., total monetary value processed, active WebSocket connections, cache hit ratios) requiring custom tags and conditional updates.
+
+#### Use-Case
+Instrumenting core business transactions where methods require Counters, Gauges, and Timers with runtime metadata.
+
+#### Benefits Over Others
+- **Dynamic Tag Resolution:** Attach low-cardinality metadata (e.g., `payment_type=CREDIT_CARD`, `region=EU`) dynamically.
+- **Strongly Typed Metric Primitives:** Direct access to `Counter`, `Timer`, `Gauge`, and `DistributionSummary`.
+
+#### Production-Grade Code Example
 
 ```java
+package com.example.observability.metrics.registry;
+
+import io.micrometer.core.instrument.*;
+import io.micrometer.core.instrument.Timer;
+import org.springframework.stereotype.Service;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
+@Service
+public class BillingMetricsRecorder {
+
+    private final Counter successfulPaymentsCounter;
+    private final Counter failedPaymentsCounter;
+    private final Timer paymentProcessingTimer;
+    private final DistributionSummary paymentAmountDistribution;
+    // CRITICAL: Hold a strong reference to the Gauge target object!
+    // Weak references in MeterRegistry can cause gauges to report NaN after GC.
+    private final AtomicInteger activeCheckoutSessionsGauge;
+
+    public BillingMetricsRecorder(MeterRegistry registry) {
+        // 1. Monotonically increasing Counters
+        this.successfulPaymentsCounter = Counter.builder("billing.payments.completed")
+                .description("Total number of successfully settled payments")
+                .tag("environment", "prod")
+                .register(registry);
+
+        this.failedPaymentsCounter = Counter.builder("billing.payments.failed")
+                .description("Total number of rejected payments")
+                .tag("environment", "prod")
+                .register(registry);
+
+        // 2. Timer with Percentiles and Histogram Buckets
+        this.paymentProcessingTimer = Timer.builder("billing.payment.duration")
+                .description("Execution latency for payment gateway settlement")
+                .publishPercentiles(0.5, 0.95, 0.99) // P50, P95, P99 client-side
+                .publishPercentileHistogram()        // Required for histogram_quantile() in Prometheus
+                .register(registry);
+
+        // 3. Distribution Summary for Payload/Financial Sizes (non-time data)
+        this.paymentAmountDistribution = DistributionSummary.builder("billing.payment.amount")
+                .description("Distribution of settled payment amounts")
+                .baseUnit("USD")
+                .publishPercentiles(0.5, 0.9, 0.99)
+                .register(registry);
+
+        // 4. Gauge for active connection/session count
+        this.activeCheckoutSessionsGauge = registry.gauge(
+                "billing.sessions.active",
+                Tags.of("service", "checkout"),
+                new AtomicInteger(0)
+        );
+    }
+
+    public void recordPaymentSettled(double amount, long durationMs) {
+        successfulPaymentsCounter.increment();
+        paymentAmountDistribution.record(amount);
+        paymentProcessingTimer.record(java.time.Duration.ofMillis(durationMs));
+    }
+
+    public void incrementActiveSessions() { activeCheckoutSessionsGauge.incrementAndGet(); }
+    public void decrementActiveSessions() { activeCheckoutSessionsGauge.decrementAndGet(); }
+}
+```
+
+---
+
+### Approach 2: Declarative AOP Method Instrumentation (`@Timed` & `@Counted`)
+
+#### Scenario
+Standard controller and service methods where developers want to track execution latency and call counts without boilerplate code.
+
+#### Use-Case
+Monitoring REST API endpoints and service methods with minimal intrusion on business logic.
+
+#### Benefits Over Others
+- **Zero Business Code Pollution:** Purely declarative via annotations.
+- **Built-in Error Tagging:** `@Timed` automatically tags exceptions thrown by the method.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.observability.metrics.declarative;
+
+import io.micrometer.core.annotation.Counted;
+import io.micrometer.core.annotation.Timed;
+import io.micrometer.core.aop.CountedAspect;
 import io.micrometer.core.aop.TimedAspect;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-@Configuration
-public class MetricsConfig {
-    @Bean
-    public TimedAspect timedAspect(MeterRegistry registry) {
-        return new TimedAspect(registry);
-    }
-}
-```
-
-Usage:
-
-```java
-import io.micrometer.core.annotation.Timed;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@RestController
-public class PaymentController {
+@Configuration
+class MetricAspectConfig {
+    @Bean
+    public TimedAspect timedAspect(MeterRegistry registry) { return new TimedAspect(registry); }
+    @Bean
+    public CountedAspect countedAspect(MeterRegistry registry) { return new CountedAspect(registry); }
+}
 
-    @GetMapping("/api/payments")
-    @Timed(value = "payments.fetch.time", description = "Time taken to fetch payments")
-    public String getPayments() {
-        return "Payments list";
+@RestController
+@RequestMapping("/api/v1/catalog")
+public class CatalogController {
+
+    @GetMapping("/products")
+    @Timed(
+            value = "catalog.products.request.time",
+            description = "Time taken to fetch catalog products",
+            percentiles = {0.5, 0.95, 0.99},
+            histogram = true
+    )
+    @Counted(
+            value = "catalog.products.invocations",
+            description = "Total requests received for product catalog"
+    )
+    public String listProducts() {
+        return "Product list payload";
     }
 }
 ```
-
-### 3.5. Exporting to Prometheus and Visualizing in Grafana
-
-Prometheus is a popular pull-based monitoring system. To export metrics for Prometheus, add the dependency:
-
-```xml
-<dependency>
-    <groupId>io.micrometer</groupId>
-    <artifactId>micrometer-registry-prometheus</artifactId>
-</dependency>
-```
-
-In `application.yml`, enable the Prometheus endpoint:
-
-```yaml
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus
-```
-
-Your metrics will now be available at `/actuator/prometheus` in Prometheus scrape format. You configure Prometheus to scrape this URL every ~15 seconds. You then connect Grafana to Prometheus and build dashboards visualizing metrics like `http_server_requests_seconds_count` or `jvm_memory_used_bytes`.
 
 ---
 
-## 4. Distributed Tracing
+### Approach 3: Spring Boot 3 Unified `ObservationRegistry` & `ObservationHandler`
 
-In a distributed system, a single user click might trigger calls to Service A, which calls Service B and C. If the click takes 5 seconds, which service is the bottleneck?
+#### Scenario
+Modern Spring Boot 3.x microservices where every monitored operation should produce **both a metric and a distributed tracing span** simultaneously from a single API call.
 
-### 4.1. Trace ID vs Span ID
+#### Use-Case
+The recommended modern standard for instrumentation in Spring Boot 3.x, replacing separate Micrometer and Sleuth/Tracing calls.
 
--   **Trace ID**: A unique identifier for the entire transaction (the entire journey across all microservices).
--   **Span ID**: A unique identifier for a specific unit of work (e.g., an HTTP call to one service, or a database query). A Trace contains a tree of Spans.
+#### Benefits Over Others
+- **Unified Instrumentation:** A single `Observation.observe()` call registers a timer metric in Prometheus AND starts a span in OpenTelemetry/Zipkin.
+- **Cardinaity Protection:** Supports `lowCardinalityKeyValue` (metrics + spans) and `highCardinalityKeyValue` (spans only), preventing high-cardinality memory leaks in Prometheus.
 
-### 4.2. Micrometer Tracing (Spring Boot 3)
+#### Production-Grade Code Example
 
-In Spring Boot 2, tracing was handled by Spring Cloud Sleuth. In Spring Boot 3, Sleuth has been retired and replaced by **Micrometer Tracing**.
+```java
+package com.example.observability.metrics.observation;
 
-Add the dependencies for Micrometer Tracing and an exporter (e.g., Zipkin):
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 
-```xml
-<!-- Core Micrometer Tracing -->
-<dependency>
-    <groupId>io.micrometer</groupId>
-    <artifactId>micrometer-tracing-bridge-brave</artifactId> <!-- Or bridge-otel for OpenTelemetry -->
-</dependency>
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class UnifiedOrderProcessingService {
 
-<!-- Export to Zipkin -->
-<dependency>
-    <groupId>io.zipkin.reporter2</groupId>
-    <artifactId>zipkin-reporter-brave</artifactId>
-</dependency>
+    private final ObservationRegistry observationRegistry;
+
+    public String processOrder(String orderId, String customerTier, double amount) {
+        // Unified Observation: produces both a Timer metric AND an OpenTelemetry Span!
+        return Observation.createNotStarted("order.processing", observationRegistry)
+                // Low cardinality: Goes to both Prometheus metrics AND Tracing spans
+                .lowCardinalityKeyValue("customer.tier", customerTier)
+                .lowCardinalityKeyValue("currency", "USD")
+                // High cardinality: Goes ONLY to Tracing spans (protects Prometheus from OOM!)
+                .highCardinalityKeyValue("order.id", orderId)
+                .highCardinalityKeyValue("amount.exact", String.valueOf(amount))
+                .observe(() -> {
+                    log.info("Executing order settlement for order '{}'", orderId);
+                    // Business logic...
+                    return "ORDER-PROCESSED-" + orderId;
+                });
+    }
+}
 ```
 
-Configure `application.yml`:
+---
 
-```yaml
-management:
-  tracing:
-    sampling:
-      probability: 1.0 # 1.0 = Sample 100% of requests. In production, use 0.1 (10%)
-  zipkin:
-    tracing:
-      endpoint: "http://localhost:9411/api/v2/spans"
+### Approach 4: Active Job Duration Tracking via `LongTaskTimer`
+
+#### Scenario
+Asynchronous batch processing jobs, CSV data imports, or nightly database re-indexing tasks that run for minutes or hours.
+
+#### Use-Case
+Standard `Timer` only records duration *after* the task completes. If a 30-minute batch job gets stuck in an infinite loop, a standard `Timer` reports nothing. `LongTaskTimer` reports active task duration **while the task is running**, enabling alerts on stuck jobs.
+
+#### Benefits Over Others
+- **In-Flight Duration Visibility:** Query `long_task_timer_duration_seconds` to see how long an active job has been running right now.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.observability.metrics.longtask;
+
+import io.micrometer.core.instrument.LongTaskTimer;
+import io.micrometer.core.instrument.MeterRegistry;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+@Service
+@Slf4j
+public class NightlySettlementBatchJob {
+
+    private final LongTaskTimer batchJobTimer;
+
+    public NightlySettlementBatchJob(MeterRegistry registry) {
+        this.batchJobTimer = LongTaskTimer.builder("batch.settlement.job")
+                .description("Measures active execution duration of the nightly settlement job")
+                .tag("job_type", "reconciliation")
+                .register(registry);
+    }
+
+    @Scheduled(cron = "0 0 2 * * *") // Daily at 2 AM
+    public void executeSettlement() {
+        LongTaskTimer.Sample activeSample = batchJobTimer.start();
+        try {
+            log.info("Starting nightly ledger reconciliation...");
+            // Long running batch execution...
+        } finally {
+            activeSample.stop();
+            log.info("Completed nightly ledger reconciliation.");
+        }
+    }
+}
 ```
 
-Spring Boot auto-configures `RestTemplate`, `WebClient`, `@FeignClient`, and incoming MVC/WebFlux requests to automatically propagate Trace IDs via HTTP headers (e.g., `X-B3-TraceId` or W3C `traceparent`).
+---
 
-### 4.3. OpenTelemetry Integration
+## 4. Distributed Tracing & Context Propagation Approaches
 
-OpenTelemetry (OTel) is the modern CNCF standard. You can swap Brave for OTel:
+Distributed tracing links a user's initial HTTP request across all participating downstream microservices, databases, and message brokers using a shared **Trace ID**.
+
+```
+Client Request
+      │
+      ▼
+┌──────────────┐     HTTP Headers (traceparent)     ┌──────────────┐
+│  API Gateway │ ─────────────────────────────────▶ │ OrderService │
+│ TraceId: A1  │                                    │ TraceId: A1  │
+│ SpanId: 001  │                                    │ SpanId: 002  │
+└──────────────┘                                    └──────┬───────┘
+                                                           │ Kafka Header
+                                                           ▼
+                                                    ┌──────────────┐
+                                                    │ StockWorker  │
+                                                    │ TraceId: A1  │
+                                                    │ SpanId: 003  │
+                                                    └──────────────┘
+```
+
+---
+
+### Approach 1: OpenTelemetry Standard Bridge (`micrometer-tracing-bridge-otel`)
+
+#### Scenario
+Modern cloud-native Kubernetes deployments adopting the CNCF OpenTelemetry (OTel) standard for distributed tracing.
+
+#### Use-Case
+Sending traces to OpenTelemetry Collectors, Jaeger, Datadog, or Grafana Tempo via standard OTLP (OpenTelemetry Protocol).
+
+#### Benefits Over Others
+- **Vendor Agnostic:** The global standard for distributed observability.
+- **W3C `traceparent` Compliance:** Natively propagates W3C trace context headers across microservice boundaries.
+
+#### Production-Grade Code Example
 
 ```xml
+<!-- Maven dependencies for OpenTelemetry with Spring Boot 3 -->
 <dependency>
     <groupId>io.micrometer</groupId>
     <artifactId>micrometer-tracing-bridge-otel</artifactId>
@@ -430,44 +598,178 @@ OpenTelemetry (OTel) is the modern CNCF standard. You can swap Brave for OTel:
 ```
 
 ```yaml
+# application.yml
 management:
+  tracing:
+    sampling:
+      probability: 0.1 # Sample 10% of requests in production
   otlp:
     tracing:
-      endpoint: "http://localhost:4318/v1/traces"
+      endpoint: "http://otel-collector.monitoring.svc:4318/v1/traces"
 ```
-
-### 4.4. MDC (Mapped Diagnostic Context) for Logging Correlation
-
-Micrometer Tracing automatically injects the `traceId` and `spanId` into your logging framework's MDC (Mapped Diagnostic Context).
-
-By updating your Logback pattern, you can output these IDs:
-
-```xml
-<!-- logback-spring.xml snippet -->
-<pattern>%d{yyyy-MM-dd HH:mm:ss} - [%thread] %-5level %logger{36} - [traceId=%X{traceId}, spanId=%X{spanId}] - %msg%n</pattern>
-```
-
-Log output:
-`2026-10-06 10:15:20 - [http-nio-8080-exec-1] INFO  com.app.OrderService - [traceId=658b1a2e3f4d, spanId=987c6b5a] - Processing order 123`
-
-This allows you to copy a `traceId` from the logs and paste it into Zipkin/Jaeger to see the exact flow.
 
 ---
 
-## 5. Structured Logging
+### Approach 2: Brave / Zipkin Bridge (`micrometer-tracing-bridge-brave`)
 
-### 5.1. Why JSON Logging?
+#### Scenario
+Legacy or existing microservice fleets using Zipkin and B3 propagation headers (`X-B3-TraceId`, `X-B3-SpanId`).
 
-Traditional log files (plain text) are meant for human eyes. However, log aggregators (Elasticsearch, Splunk, Datadog) parse logs better if they are structured as JSON.
+#### Use-Case
+Drop-in replacement for Spring Cloud Sleuth applications upgrading to Spring Boot 3.x while keeping existing Zipkin server infrastructure.
 
-Instead of parsing a regex against `[%thread] %-5level`, JSON logs are pre-parsed key-value pairs:
-`{"timestamp":"...", "level":"INFO", "thread":"http-nio", "traceId":"...", "message":"..."}`
+---
 
-### 5.2. Logback Configuration for JSON (LogstashEncoder)
+### Approach 3: Programmatic Spans & Distributed Baggage Propagation
 
-To generate JSON logs natively in Spring Boot, use `logstash-logback-encoder`:
+#### Scenario
+A microservice receives a request with an incoming `X-Tenant-ID` or `X-User-ID` header. That metadata must travel across all downstream HTTP and Kafka calls without polluting every Java method signature.
+
+#### Use-Case
+Propagating cross-cutting tenant identifiers and creating manual spans for fine-grained internal operations.
+
+#### Benefits Over Others
+- **Transparent Propagation:** Baggage fields attach to the trace context and are automatically serialized into downstream HTTP headers.
+- **Automatic MDC Integration:** Configured baggage fields appear automatically in application log output.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.observability.tracing.baggage;
+
+import io.micrometer.tracing.BaggageField;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class TracedInventoryService {
+
+    private final Tracer tracer;
+    // Define baggage field matching application.yml correlation settings
+    private static final BaggageField TENANT_FIELD = BaggageField.create("tenantId");
+
+    public boolean reserveStock(String sku, int quantity, String tenantId) {
+        // 1. Attach tenant ID to the active distributed trace baggage
+        TENANT_FIELD.set(tenantId);
+
+        // 2. Start a custom programmatic span for fine-grained timing
+        Span dbCheckSpan = tracer.nextSpan().name("database-inventory-lock").start();
+
+        try (Tracer.SpanInScope ws = tracer.withSpan(dbCheckSpan)) {
+            dbCheckSpan.tag("sku", sku);
+            dbCheckSpan.tag("quantity", String.valueOf(quantity));
+            dbCheckSpan.event("evaluating-warehouse-bins");
+
+            log.info("Checking inventory allocation for SKU '{}' (Baggage tenant: '{}')",
+                    sku, TENANT_FIELD.getValue());
+
+            return executeReservation(sku, quantity);
+
+        } catch (Exception ex) {
+            dbCheckSpan.error(ex);
+            throw ex;
+        } finally {
+            dbCheckSpan.end(); // Always close spans in finally blocks!
+        }
+    }
+
+    private boolean executeReservation(String sku, int qty) { return true; }
+}
+```
+
+---
+
+### Approach 4: ThreadContext Propagation Across `@Async` & Reactive Streams
+
+#### Scenario
+When a service method delegates work to an `@Async` thread pool or a reactive Project Reactor pipeline, the `ThreadLocal` context holding the trace ID and MDC logging context is lost.
+
+#### Use-Case
+Preserving `traceId` and log correlation across asynchronous thread boundaries.
+
+#### Benefits Over Others
+- **Continuous Logging Correlation:** Prevents un-traceable log lines with empty `[traceId=]`.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.observability.tracing.async;
+
+import org.slf4j.MDC;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskDecorator;
+import org.springframework.scheduling.annotation.AsyncConfigurer;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.Map;
+import java.util.concurrent.Executor;
+
+@Configuration
+@EnableAsync
+public class TracedAsyncExecutorConfig implements AsyncConfigurer {
+
+    @Bean(name = "tracedTaskExecutor")
+    @Override
+    public Executor getAsyncExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(16);
+        executor.setThreadNamePrefix("traced-async-");
+        // TaskDecorator captures caller ThreadLocal state and restores it on worker thread
+        executor.setTaskDecorator(new MdcContextPropagatingTaskDecorator());
+        executor.initialize();
+        return executor;
+    }
+}
+
+class MdcContextPropagatingTaskDecorator implements TaskDecorator {
+    @Override
+    public Runnable decorate(Runnable runnable) {
+        // 1. Capture context from the caller thread
+        Map<String, String> callerMdc = MDC.getCopyOfContextMap();
+        return () -> {
+            try {
+                // 2. Restore context on the worker thread
+                if (callerMdc != null) {
+                    MDC.setContextMap(callerMdc);
+                }
+                runnable.run();
+            } finally {
+                // 3. Clear worker thread state to prevent thread pool pollution
+                MDC.clear();
+            }
+        };
+    }
+}
+```
+
+---
+
+## 5. Structured Logging & Runtime Diagnostics
+
+Plain-text log files are difficult for log aggregators (ELK, OpenSearch, Loki) to parse. Modern systems emit structured JSON logs with correlated trace IDs.
+
+---
+
+### Approach 1: Structured JSON Logging with MDC Correlation
+
+#### Scenario
+Production microservices streaming logs to Elasticsearch, Datadog, or Grafana Loki.
+
+#### Use-Case
+Formatting every log statement as a single-line JSON object containing timestamp, log level, thread, logger, trace ID, span ID, and message.
+
+#### Production-Grade Code Example
 
 ```xml
+<!-- Dependency: logstash-logback-encoder -->
 <dependency>
     <groupId>net.logstash.logback</groupId>
     <artifactId>logstash-logback-encoder</artifactId>
@@ -475,129 +777,226 @@ To generate JSON logs natively in Spring Boot, use `logstash-logback-encoder`:
 </dependency>
 ```
 
-Create a `logback-spring.xml`:
-
 ```xml
+<!-- src/main/resources/logback-spring.xml -->
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <includeMdcKeyName>traceId</includeMdcKeyName>
-            <includeMdcKeyName>spanId</includeMdcKeyName>
+    <springProperty scope="context" name="applicationName" source="spring.application.name"/>
+
+    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <timeZone>UTC</timeZone>
+                </timestamp>
+                <pattern>
+                    <pattern>
+                        {
+                            "severity": "%level",
+                            "service": "${applicationName:-unknown}",
+                            "thread": "%thread",
+                            "logger": "%logger{36}",
+                            "message": "%message",
+                            "traceId": "%mdc{traceId:-}",
+                            "spanId": "%mdc{spanId:-}",
+                            "tenantId": "%mdc{tenantId:-}"
+                        }
+                    </pattern>
+                </pattern>
+                <stackTrace>
+                    <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                        <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                        <rootCauseFirst>true</rootCauseFirst>
+                    </throwableConverter>
+                </stackTrace>
+            </providers>
         </encoder>
     </appender>
 
-    <!-- Use plain text for dev profile, JSON for prod -->
-    <springProfile name="dev">
-        <root level="INFO">
-            <appender-ref ref="CONSOLE" />
-        </root>
-    </springProfile>
-
-    <springProfile name="prod">
-        <root level="INFO">
-            <appender-ref ref="CONSOLE_JSON" />
-        </root>
-    </springProfile>
+    <root level="INFO">
+        <appender-ref ref="JSON_CONSOLE"/>
+    </root>
 </configuration>
 ```
 
-### 5.3. Dynamic Log Levels via Actuator
+---
 
-You can change log levels dynamically without a restart!
-1. Check current loggers: `GET /actuator/loggers`
-2. Change log level via HTTP POST:
+### Approach 2: Dynamic Runtime Log Level Mutation via Actuator
+
+#### Scenario
+A production bug occurs, but the service is configured at `INFO` level. Operators need detailed `DEBUG` logs for a specific package without restarting the application or redeploying.
+
+#### Use-Case
+Changing log levels dynamically at runtime via HTTP POST to `/actuator/loggers/{name}`.
+
+#### Production-Grade Code Example
 
 ```bash
-curl -X POST http://localhost:8080/actuator/loggers/com.yourcompany.payments \
+# 1. Inspect current log level for billing package
+curl -X GET http://localhost:8080/actuator/loggers/com.example.billing
+
+# Output:
+# {"configuredLevel":"INFO","effectiveLevel":"INFO"}
+
+# 2. Dynamically switch billing package to DEBUG at runtime
+curl -X POST http://localhost:8080/actuator/loggers/com.example.billing \
      -H "Content-Type: application/json" \
      -d '{"configuredLevel": "DEBUG"}'
+
+# 3. Once incident investigation is complete, revert back to INFO
+curl -X POST http://localhost:8080/actuator/loggers/com.example.billing \
+     -H "Content-Type: application/json" \
+     -d '{"configuredLevel": "INFO"}'
 ```
-
-This is invaluable for debugging a production issue in real-time.
-
-### 5.4. ELK Stack Integration Overview
-
--   **Logstash / Fluentbit**: Collects the JSON logs emitted by your Spring Boot apps to stdout.
--   **Elasticsearch**: Stores and indexes the JSON logs.
--   **Kibana**: The UI where you search logs. You can filter `level: "ERROR"` and `traceId: "12345"`.
 
 ---
 
-## 6. Exception & Error Tracking
+## 6. Prometheus AlertManager & Grafana Dashboard Architectures
 
-### 6.1. Sentry Integration
+Exposing metrics is only half the battle; alerting on error budgets and Service Level Objectives (SLOs) ensures fast incident response.
 
-While logs are great, exception tracking tools like Sentry automatically group identical exceptions and alert you when a new type of error spikes.
-
-```xml
-<dependency>
-    <groupId>io.sentry</groupId>
-    <artifactId>sentry-spring-boot-starter-jakarta</artifactId>
-    <version>7.3.0</version>
-</dependency>
-```
-
-Configure the DSN in `application.yml`:
+### Production Prometheus Rules (`prometheus-alerts.yml`)
 
 ```yaml
-sentry:
-  dsn: https://examplePublicKey@o0.ingest.sentry.io/0
-  traces-sample-rate: 1.0
-  exception-resolver-order: -2147483647
+groups:
+  - name: spring-boot-sla-alerts
+    rules:
+      # Alert when HTTP 5xx error rate exceeds 2% over a 5-minute window
+      - alert: HttpErrorRateExceeded
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            /
+            sum(rate(http_server_requests_seconds_count[5m]))
+          ) > 0.02
+        for: 2m
+        labels:
+          severity: critical
+          team: platform-core
+        annotations:
+          summary: "HTTP 5xx error rate above 2% on {{ $labels.application }}"
+          description: "Service is failing {{ $value | humanizePercentage }} of requests."
+
+      # Alert when P99 latency exceeds 1.5 seconds
+      - alert: HighP99Latency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (le, application)
+          ) > 1.5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 latency above 1.5s on {{ $labels.application }}"
+
+      # Alert when HikariCP connection pool is saturated
+      - alert: DatabasePoolExhaustion
+        expr: hikaricp_connections_pending > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HikariCP connection pool exhausted on {{ $labels.application }}"
+          description: "{{ $value }} threads blocked waiting for database connections."
 ```
-Any unhandled exception hitting your REST controllers will now automatically be reported to Sentry, including the stack trace, HTTP request parameters, and user context.
 
 ---
 
-## ⚠️ 7. Interview Traps & Gotchas
+## 7. Comprehensive Configuration Reference
 
-> [!WARNING] The High Cardinality Trap
-> Never use unbounded dynamic values (like user IDs, order IDs, or UUIDs) as tags/labels in Micrometer metrics.
-> **BAD**: `registry.counter("login.attempts", "userId", "user-1234")`
-> **GOOD**: `registry.counter("login.attempts", "status", "success")`
-> *Why?* Every unique combination of tags creates a new Time Series object in memory and in Prometheus. High cardinality (millions of unique user IDs) will cause an OutOfMemoryError (OOM) in your application and crash your Prometheus server.
+```yaml
+spring:
+  application:
+    name: order-service
 
-> [!WARNING] Exposing Sensitive Data in `/env`
-> Actuator's `/env` endpoint will show property values. Spring Boot automatically masks keys containing words like `password`, `secret`, `key`, `token`. However, if you name your property `my.custom.db.auth-string`, Spring Boot won't mask it. You must configure `management.endpoint.env.keys-to-sanitize` to include your custom keys.
-
-> [!WARNING] MDC Context Lost in @Async or Reactive Flows
-> `MDC` uses `ThreadLocal` under the hood. If you spawn a new thread (e.g., using `@Async`, `CompletableFuture`, or `Project Reactor`), the `traceId` will be lost in the new thread!
-> *Solution*: In Spring Boot 3 with Micrometer Tracing, use `ContextSnapshot` for manual propagation, or rely on Hooks for Reactor (`Hooks.enableAutomaticContextPropagation()`). For standard `@Async`, you must configure a `TaskDecorator` to copy MDC data from the calling thread to the executor thread.
-
-> [!IMPORTANT] Trace ID Propagation over Message Queues
-> Trace IDs don't propagate magically over Kafka or RabbitMQ. If using Spring AMQP or Spring Kafka, Spring Boot auto-configures the injection of Trace IDs into message headers. However, if you are using raw Apache Kafka clients or native Java clients, the Trace ID context will break unless you manually inject the context into the Kafka Headers before sending, and extract it on the consumer side.
+management:
+  server:
+    port: 8081 # Expose actuator on internal management port
+    address: 0.0.0.0
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,loggers
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+      probes:
+        enabled: true # Enables /actuator/health/liveness and /readiness
+      group:
+        readiness:
+          include: readinessState,db,diskSpace
+        liveness:
+          include: livenessState
+  tracing:
+    sampling:
+      probability: 0.1 # 10% sampling
+    baggage:
+      enabled: true
+      remote-fields:
+        - tenantId
+      correlation:
+        fields:
+          - tenantId
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      region: us-east-1
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true # Enables Prometheus histogram buckets
+```
 
 ---
 
-## 🔍 8. Deep Dive: How Micrometer Tracing works internally
+## 8. ⚠️ Interview Traps & Production Gotchas
 
-When an HTTP Request arrives:
-1.  **Filter/Interceptor**: A filter (e.g., `ServerHttpObservationFilter`) intercepts the request.
-2.  **Extraction**: It looks for standard HTTP headers (like `traceparent` or `X-B3-TraceId`).
-    -   If found, it adopts the existing `TraceId` and creates a new child `SpanId`.
-    -   If not found, it generates a new `TraceId` and root `SpanId`.
-3.  **Scope**: It opens a "Scope" which places these IDs into a `ThreadLocal` storage (and synchronizes it with SLF4J MDC).
-4.  **Execution**: Your Controller / Service code runs. All logs emitted will include the IDs from the MDC.
-5.  **Injection**: If you make a downstream HTTP call via `RestTemplate`, an interceptor intercepts the outgoing call, reads the IDs from `ThreadLocal`, and injects them as HTTP headers on the outgoing request.
-6.  **Completion**: When the request finishes, the filter closes the Span, recording its duration, and asynchronously exports it to Zipkin/Jaeger.
+### Trap 1: The High Cardinality Metrics OOM Trap
 
----
-
-## 📝 9. Summary & Key Takeaways
-
-1.  **Observability is non-negotiable** in distributed systems. You need Logs, Metrics, and Traces.
-2.  **Actuator** exposes endpoints for health, metrics, and administration. It must be strictly secured.
-3.  **Micrometer** abstracts metric collection. Beware of the high cardinality trap with Tags.
-4.  **Micrometer Tracing** (formerly Sleuth) automatically propagates Trace and Span IDs across HTTP and Message brokers.
-5.  **Structured JSON Logging** combined with MDC ensures every log line can be tied to a specific request trace in ELK.
+> [!CAUTION]
+> Never use unbounded values (User IDs, Order UUIDs, raw email addresses, full URLs with query parameters) as tags in Micrometer metrics:
+> ```java
+> // ❌ DISASTROUS ANTI-PATTERN: Creates millions of TimeSeries objects in memory!
+> registry.counter("http.requests", "user_id", userId); // OOM crash!
+> 
+> // ✅ CORRECT: Use bounded, finite enumerations for metrics
+> registry.counter("http.requests", "user_tier", "PREMIUM");
+> // Put the high-cardinality user_id into tracing spans or baggage instead!
+> ```
 
 ---
 
-## ❓ 10. Practice Questions
+### Trap 2: Slow Dependencies in the Liveness Probe
 
-1.  What is the difference between a Trace ID and a Span ID?
-2.  How would you prevent the `/heapdump` endpoint from being accessed over the internet, while allowing Kubernetes to access `/health/liveness`?
-3.  You notice your JVM memory usage linearly increasing over days until the app crashes. You are using Micrometer to record API usage. What is the most likely cause?
-4.  Why does logging the `traceId` stop working when you use `@Async` on a method, and how do you fix it?
-5.  Explain the difference between a Liveness probe and a Readiness probe in Kubernetes.
+Adding external dependency checks (database queries, remote REST calls) to the **liveness** probe will cause Kubernetes to restart pods during high database load, worsening the outage. Keep liveness probes lightweight (JVM state only); place dependency checks in the **readiness** probe.
+
+---
+
+### Trap 3: Masking Sensitive Properties in `/actuator/env`
+
+Actuator automatically sanitizes values for keys containing `password`, `secret`, or `key`. If a property is named `app.datasource.credential-token`, Actuator will display it in plain text. Always configure `management.endpoint.env.keys-to-sanitize` explicitly.
+
+---
+
+## 9. 📝 Architectural Comparison Matrix
+
+| Dimension | Prometheus Metrics | Distributed Traces (OTel) | Structured JSON Logs |
+|---|---|---|---|
+| **Primary Question Answered** | "Is the service healthy?" | "Where did time go?" | "Why did a specific line fail?" |
+| **Storage Cost** | Very low (fixed per time-series) | Moderate (governed by sample rate) | High (proportional to log volume) |
+| **Cardinality Tolerance** | **Extremely Low** (bounded tags only) | **Extremely High** (UUIDs, user IDs) | **High** (full text search) |
+| **Retention Window** | Long (15-90 days) | Short (3-14 days) | Medium (14-30 days) |
+| **Query Mechanism** | PromQL | Trace Timeline Gantt Chart | Elasticsearch / Lucene / LogQL |
+
+---
+
+## 10. ❓ Practice Questions & Real-World Scenarios
+
+1. **What is the difference between a Kubernetes Liveness probe and a Readiness probe, and how does Spring Boot map them?**
+   - *Answer:* Liveness checks if the JVM is functioning (not deadlocked). If it fails, Kubernetes restarts the pod. Readiness checks if the pod can accept user traffic. If it fails, Kubernetes removes the pod from the Service load balancer without restarting it. Spring Boot maps them to `/actuator/health/liveness` and `/actuator/health/readiness`.
+
+2. **Why does high tag cardinality cause OutOfMemoryErrors in Micrometer and Prometheus?**
+   - *Answer:* In Prometheus and Micrometer, every unique combination of metric name and tag key-value pairs creates a completely new, distinct `TimeSeries` object in JVM heap and Prometheus storage. Adding 1,000,000 distinct user IDs generates 1,000,000 active time series, exhausting heap memory.
+
+3. **How do you propagate distributed trace IDs across an `@Async` thread boundary?**
+   - *Answer:* Because `ThreadLocal` context does not cross thread boundaries automatically, you configure a `TaskDecorator` on the `ThreadPoolTaskExecutor` to copy the MDC map from the calling thread to the executor worker thread before task execution, and clear it in a `finally` block.

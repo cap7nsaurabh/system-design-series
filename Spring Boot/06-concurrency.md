@@ -1,701 +1,646 @@
 # 06 — Concurrency & Race Conditions in Spring Boot
 
-> This module is a production-grade, interview-focused deep dive into every layer of concurrency you will encounter in a Spring Boot application — from JVM threads and Java primitives all the way to distributed locks and reactive models.
+> A production-grade, deep-dive reference into JVM memory models, race conditions, thread synchronization, asynchronous architectures, ThreadLocal context propagation, database locking, and distributed synchronization in Spring Boot 3.x and Java 17/21+.
 
 ---
 
 ## Table of Contents
 
-1. [Java Concurrency Fundamentals (Spring Context)](#1-java-concurrency-fundamentals-spring-context)
-2. [Race Conditions — Complete Explanation](#2-race-conditions--complete-explanation)
-3. [Synchronization in Java](#3-synchronization-in-java)
-4. [@Async Deep Dive](#4-async-deep-dive)
-5. [Thread Pools in Spring Boot](#5-thread-pools-in-spring-boot)
-6. [CompletableFuture](#6-completablefuture)
-7. [Database-Level Concurrency](#7-database-level-concurrency)
-8. [Distributed Concurrency](#8-distributed-concurrency)
-9. [Common Concurrency Bugs in Spring](#9-common-concurrency-bugs-in-spring)
-10. [WebFlux & Reactive — Brief Overview](#10-webflux--reactive--brief-overview)
-11. [⚠️ Interview Traps & Gotchas](#️-interview-traps--gotchas)
-12. [🔍 Deep Dive — JMM and Happens-Before](#-deep-dive--jmm-and-happens-before)
-13. [📝 Summary & Key Takeaways](#-summary--key-takeaways)
-14. [❓ Practice Questions](#-practice-questions)
+1. [Java Concurrency Fundamentals in Spring Context](#1-java-concurrency-fundamentals-in-spring-context)
+   - [1.1 JVM Memory Model & OS Thread Mapping](#11-jvm-memory-model--os-thread-mapping)
+   - [1.2 Spring Beans are Singletons by Default](#12-spring-beans-are-singletons-by-default)
+   - [1.3 Stateless vs. Stateful Bean Architectures](#13-stateless-vs-stateful-bean-architectures)
+   - [1.4 The ThreadLocal Architecture in Spring](#14-the-threadlocal-architecture-in-spring)
+2. [Race Conditions & Concurrency Hazards](#2-race-conditions--concurrency-hazards)
+   - [2.1 Check-Then-Act Race Condition](#21-check-then-act-race-condition)
+   - [2.2 Read-Modify-Write Race Condition](#22-read-modify-write-race-condition)
+   - [2.3 Spring Singleton State Pollution](#23-spring-singleton-state-pollution)
+   - [2.4 Race Condition Detection & Reproducibility](#24-race-condition-detection--reproducibility)
+3. [Multi-Approach: In-Process Thread Synchronization Strategies](#3-multi-approach-in-process-thread-synchronization-strategies)
+   - [Approach 1: Stateless Architecture (Stack Confinement & Immutability)](#approach-1-stateless-architecture-stack-confinement--immutability)
+   - [Approach 2: Hardware-Level Compare-And-Swap (CAS) & Scalable Adders](#approach-2-hardware-level-compare-and-swap-cas--scalable-adders)
+   - [Approach 3: Explicit Lock Primitives (ReentrantLock & ReadWriteLock & StampedLock)](#approach-3-explicit-lock-primitives-reentrantlock--readwritelock--stampedlock)
+   - [Approach 4: Thread-Safe Concurrent Collections & Atomic Lambdas](#approach-4-thread-safe-concurrent-collections--atomic-lambdas)
+   - [Approach 5: Intrinsic Monitor Synchronization with Dedicated Private Lock Monitors](#approach-5-intrinsic-monitor-synchronization-with-dedicated-private-lock-monitors)
+   - [In-Process Synchronization Comparison Matrix](#in-process-synchronization-comparison-matrix)
+4. [Multi-Approach: Asynchronous Task Execution Architectures](#4-multi-approach-asynchronous-task-execution-architectures)
+   - [Approach 1: Declarative `@Async` with Custom `ThreadPoolTaskExecutor`](#approach-1-declarative-async-with-custom-threadpooltaskexecutor)
+   - [Approach 2: Programmatic Pipeline Composition via `CompletableFuture`](#approach-2-programmatic-pipeline-composition-via-completablefuture)
+   - [Approach 3: Java 21 / Spring Boot 3.2+ Virtual Threads (Project Loom)](#approach-3-java-21--spring-boot-32-virtual-threads-project-loom)
+   - [Approach 4: Non-Blocking Reactive Streams (Spring WebFlux & Project Reactor)](#approach-4-non-blocking-reactive-streams-spring-webflux--project-reactor)
+   - [Asynchronous Architecture Comparison Matrix](#asynchronous-architecture-comparison-matrix)
+5. [Multi-Approach: ThreadContext Propagation across Asynchronous Boundaries](#5-multi-approach-threadcontext-propagation-across-asynchronous-boundaries)
+   - [Approach 1: Spring Framework `TaskDecorator` Configuration (Standard)](#approach-1-spring-framework-taskdecorator-configuration-standard)
+   - [Approach 2: Micrometer Context Propagation (Spring Boot 3.x Unified Standard)](#approach-2-micrometer-context-propagation-spring-boot-3x-unified-standard)
+   - [Approach 3: Spring Security `DelegatingSecurityContextExecutor`](#approach-3-spring-security-delegatingsecuritycontextexecutor)
+   - [Approach 4: Manual Context Capture, Transfer, and Eviction via Wrapper Closures](#approach-4-manual-context-capture-transfer-and-eviction-via-wrapper-closures)
+   - [Context Propagation Comparison Matrix](#context-propagation-comparison-matrix)
+6. [Multi-Approach: Database-Level Concurrency Control](#6-multi-approach-database-level-concurrency-control)
+   - [Approach 1: Optimistic Locking with `@Version` & Spring Retry](#approach-1-optimistic-locking-with-version--spring-retry)
+   - [Approach 2: Pessimistic Write Locking (`PESSIMISTIC_WRITE` / `SELECT ... FOR UPDATE`)](#approach-2-pessimistic-write-locking-pessimistic_write--select--for-update)
+   - [Approach 3: Pessimistic Read Locking (`PESSIMISTIC_READ` / `SELECT ... FOR SHARE`)](#approach-3-pessimistic-read-locking-pessimistic_read--select--for-share)
+   - [Approach 4: Single-Statement Atomic Database Mutations (`UPDATE ... WHERE condition`)](#approach-4-single-statement-atomic-database-mutations-update--where-condition)
+   - [Database Concurrency Comparison Matrix](#database-concurrency-comparison-matrix)
+7. [Multi-Approach: Distributed Locking & Multi-Node Synchronization](#7-multi-approach-distributed-locking--multi-node-synchronization)
+   - [Approach 1: Redis Distributed Lock with Redisson (Watchdog Auto-Renewal)](#approach-1-redis-distributed-lock-with-redisson-watchdog-auto-renewal)
+   - [Approach 2: Database Advisory Locks & ShedLock Coordination](#approach-2-database-advisory-locks--shedlock-coordination)
+   - [Approach 3: Distributed Idempotency Token Pattern with Redis & Unique DB Keys](#approach-3-distributed-idempotency-token-pattern-with-redis--unique-db-keys)
+   - [Distributed Locking Comparison Matrix](#distributed-locking-comparison-matrix)
+8. [Production Thread Pool Sizing & Schedulers](#8-production-thread-pool-sizing--schedulers)
+   - [8.1 Little's Law, CPU-Bound vs. I/O-Bound Pool Sizing](#81-littles-law-cpu-bound-vs-io-bound-pool-sizing)
+   - [8.2 Saturation Policies (CallerRunsPolicy vs AbortPolicy)](#82-saturation-policies-callerrunspolicy-vs-abortpolicy)
+   - [8.3 Graceful Shutdown Protocol](#83-graceful-shutdown-protocol)
+   - [8.4 Micrometer Thread Pool Monitoring & Alerts](#84-micrometer-thread-pool-monitoring--alerts)
+9. [Common Spring Concurrency Traps & Anti-Patterns](#9-common-spring-concurrency-traps--anti-patterns)
+10. [Deep Dive: JMM, Volatile, & Happens-Before Order](#10-deep-dive-jmm-volatile--happens-before-order)
+11. [Summary & Key Takeaways](#11-summary--key-takeaways)
+12. [Practice Questions & Interview Scenarios](#12-practice-questions--interview-scenarios)
 
 ---
 
-## 1. Java Concurrency Fundamentals (Spring Context)
+## 1. Java Concurrency Fundamentals in Spring Context
 
-### 1.1 Threads and the JVM Thread Model
+### 1.1 JVM Memory Model & OS Thread Mapping
 
-Every Java program runs in a JVM process. The JVM maps Java threads 1:1 to OS-level native threads (platform threads). Each thread has:
-
-- **Program counter** — tracks which bytecode instruction to execute next
-- **Stack** — stores stack frames (local variables, method arguments, return addresses) — **thread-private**
-- **Heap** — shared among all threads; where objects live
-- **Method Area / Metaspace** — class metadata, static fields — shared
+Every standard JVM process maps Java threads 1:1 to OS-level kernel platform threads. A typical Spring Boot application on Tomcat defaults to a pool of 200 worker threads.
 
 ```
 JVM Process Memory Layout
-┌──────────────────────────────────────────────────────────────┐
-│                          HEAP (shared)                        │
-│   ┌────────────┐  ┌────────────┐  ┌────────────────────────┐ │
-│   │ Spring     │  │ Spring     │  │ Your singleton beans   │ │
-│   │ AppContext │  │ BeanFactory│  │ (UserService, etc.)    │ │
-│   └────────────┘  └────────────┘  └────────────────────────┘ │
-├──────────────────────────────────────────────────────────────┤
-│              PER-THREAD STACKS (thread-private)               │
-│  Thread-1 Stack  │  Thread-2 Stack  │  Thread-N Stack        │
-│  [frame: doWork] │  [frame: doWork] │  [frame: doWork]       │
-│  [frame: run]    │  [frame: run]    │  [frame: run]          │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                        SHARED HEAP & METASPACE                         │
+│  ┌────────────────────────┐  ┌──────────────────────────────────────┐  │
+│  │ ApplicationContext     │  │ Singleton Beans                      │  │
+│  │ (Bean definitions)     │  │ (OrderService, ProductRepository)    │  │
+│  └────────────────────────┘  └──────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Shared Objects, Cached Entities, Static Variables, Class Data    │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+├────────────────────────────────────────────────────────────────────────┤
+│                     THREAD-LOCAL STACK MEMORY                          │
+│ ┌──────────────────────┐ ┌──────────────────────┐ ┌──────────────────┐ │
+│ │ Thread: tomcat-1     │ │ Thread: tomcat-2     │ │ Thread: async-1  │ │
+│ │  - Frame: doFilter   │ │  - Frame: doFilter   │ │  - Frame: run    │ │
+│ │  - Frame: handleReq  │ │  - Frame: handleReq  │ │  - Frame: notify │ │
+│ │  - Local Primitives  │ │  - Local Primitives  │ │  - Local Prims   │ │
+│ │  - Local References  │ │  - Local References  │ │  - Local Refs    │ │
+│ └──────────────────────┘ └──────────────────────┘ └──────────────────┘ │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 > [!IMPORTANT]
-> Local variables (primitives and object references) live on the **stack** and are **thread-safe by default**. Objects on the **heap** are shared and require synchronization if mutated concurrently.
+> **Stack vs Heap Rule**: Method local variables, method arguments, and primitive types live strictly inside per-thread call stacks and are thread-safe by isolation. Any object referenced by a bean field lives on the heap and is accessible by all concurrent threads traversing that bean.
 
-### 1.2 Spring Beans are Singletons — Why This Matters
+### 1.2 Spring Beans are Singletons by Default
 
-Spring's default bean scope is **singleton**: one shared instance per `ApplicationContext`. Every HTTP request that reaches a `@RestController` is handled by a different thread from the servlet thread pool (e.g., Tomcat's), but ALL threads share the **same bean instance**.
+By default, every Spring bean defined via `@Service`, `@Component`, `@Repository`, or `@RestController` is a **singleton**. There is only **one instance** of the class in the entire `ApplicationContext`.
 
-```java
-// This singleton is created ONCE, shared by ALL threads
-@Service
-public class CounterService {
-    private int count = 0;          // ⚠️ SHARED MUTABLE STATE — DANGER!
-
-    public void increment() {
-        count++;                    // NOT atomic — race condition!
-    }
-
-    public int getCount() {
-        return count;
-    }
-}
+```
+Incoming Request 1 ──> [Thread: http-nio-8080-exec-1] ──┐
+                                                        ├──> [SINGLETON BEAN]
+Incoming Request 2 ──> [Thread: http-nio-8080-exec-2] ──┤   OrderService (1 Instance)
+                                                        │
+Incoming Request 3 ──> [Thread: http-nio-8080-exec-3] ──┘
 ```
 
-When 100 concurrent requests call `increment()`, you will lose updates because `count++` is three operations:
-1. READ `count` from memory
-2. ADD 1 to the value
-3. WRITE the new value back
+If `OrderService` defines mutable instance variables (e.g., `private int counter = 0;`), concurrent HTTP requests will mutate the identical memory location simultaneously, producing data corruption.
 
-Two threads can both read `0`, both compute `1`, and both write `1` — losing one increment.
+### 1.3 Stateless vs. Stateful Bean Architectures
 
-### 1.3 Stateless vs Stateful Beans
-
-| Characteristic | Stateless Bean | Stateful Bean |
+| Metric | Stateless Bean (Production Standard) | Stateful Bean (Anti-Pattern / Scoped) |
 |---|---|---|
-| Instance variables | Method params / injected dependencies only | Holds mutable data per-operation |
-| Thread-safety | Naturally thread-safe | Requires synchronization |
-| Spring scope | `singleton` (safe) | `prototype`, `request`, or `session` |
-| Example | `UserService`, `OrderRepository` | Shopping cart, wizard state |
+| **Instance Fields** | Only `final` injected dependencies (`Repository`, `Client`) | Mutable buffers, counters, user credentials, caches |
+| **Thread Safety** | Inherently thread-safe across unlimited requests | Requires locks, atomics, or thread-local confinement |
+| **Spring Scope** | `singleton` (default) | `request`, `session`, or `prototype` with scoped proxy |
+| **Performance Overhead** | Zero synchronization overhead; CPU cache friendly | High lock contention or allocation garbage collection |
 
-**Stateless service — perfectly safe as singleton:**
+### 1.4 The ThreadLocal Architecture in Spring
 
-```java
-@Service
-public class UserService {
-    private final UserRepository userRepository;   // immutable after injection
-    private final PasswordEncoder passwordEncoder; // immutable, stateless
+Spring Framework leverages `ThreadLocal<T>` internally to pass infrastructural contexts down the invocation stack without polluting method signatures:
+1. `SecurityContextHolder`: Holds the `Authentication` and `SecurityContext` for the calling user.
+2. `RequestContextHolder`: Exposes `HttpServletRequest` and `HttpSession` to arbitrary services.
+3. `TransactionSynchronizationManager`: Tracks active JDBC transactions, database connections, and session resources.
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
-    }
-
-    // All state lives in method-local variables — thread-safe
-    public User createUser(String username, String rawPassword) {
-        String hashed = passwordEncoder.encode(rawPassword);
-        return userRepository.save(new User(username, hashed));
-    }
-}
 ```
-
-**Stateful bean — must use correct scope:**
-
-```java
-@Component
-@Scope(value = WebApplicationContext.SCOPE_SESSION, proxyMode = ScopedProxyMode.TARGET_CLASS)
-public class ShoppingCart {
-    private final List<CartItem> items = new ArrayList<>();
-
-    public void addItem(CartItem item) { items.add(item); }
-    public List<CartItem> getItems() { return Collections.unmodifiableList(items); }
-}
-```
-
-### 1.4 ThreadLocal in Spring — RequestContextHolder & SecurityContextHolder
-
-`ThreadLocal<T>` provides **per-thread storage** — each thread gets its own isolated copy of a variable. Spring uses `ThreadLocal` extensively to pass contextual data through the call stack without method parameter pollution.
-
-```java
-// Simplified view of how Spring stores request context
-public class RequestContextHolder {
-    // Each thread gets its own RequestAttributes
-    private static final ThreadLocal<RequestAttributes> requestAttributesHolder =
-        new NamedThreadLocal<>("Request attributes");
-
-    public static RequestAttributes getRequestAttributes() {
-        return requestAttributesHolder.get();
-    }
-
-    public static void setRequestAttributes(RequestAttributes attributes) {
-        requestAttributesHolder.set(attributes);
-    }
-}
-```
-
-**SecurityContextHolder — Spring Security:**
-
-```java
-// Spring Security stores authentication per-thread (default MODE_THREADLOCAL)
-@Service
-public class AuditService {
-
-    public void logAction(String action) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String username = auth != null ? auth.getName() : "anonymous";
-        // log username + action
-        System.out.println("User: " + username + " performed: " + action);
-    }
-}
-```
-
-> [!WARNING]
-> `ThreadLocal` values are **NOT propagated** to child threads spawned by `@Async` or `CompletableFuture.runAsync()`. This is a critical source of `NullPointerException` in async code. We cover this in the `@Async` section.
-
-**Custom ThreadLocal — request correlation ID:**
-
-```java
-public final class CorrelationIdHolder {
-    private static final ThreadLocal<String> HOLDER = new ThreadLocal<>();
-
-    private CorrelationIdHolder() {}
-
-    public static void set(String id)   { HOLDER.set(id); }
-    public static String get()          { return HOLDER.get(); }
-    public static void clear()          { HOLDER.remove(); } // ⚠️ ALWAYS call in finally!
-}
-
-@Component
-public class CorrelationFilter implements Filter {
-
-    @Override
-    public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
-            throws IOException, ServletException {
-        HttpServletRequest httpReq = (HttpServletRequest) req;
-        String correlationId = Optional
-            .ofNullable(httpReq.getHeader("X-Correlation-ID"))
-            .orElse(UUID.randomUUID().toString());
-        CorrelationIdHolder.set(correlationId);
-        try {
-            chain.doFilter(req, res);
-        } finally {
-            CorrelationIdHolder.clear(); // ⚠️ CRITICAL: prevents memory leaks in thread pools
-        }
-    }
-}
+Thread A Stack ──────> ThreadLocalMap [Key: SecurityContextHolder.holder -> SecurityContext (User: "Alice")]
+Thread B Stack ──────> ThreadLocalMap [Key: SecurityContextHolder.holder -> SecurityContext (User: "Bob")]
 ```
 
 > [!CAUTION]
-> **Never forget to `ThreadLocal.remove()` in a `finally` block.** Thread pools reuse threads. Without cleanup, the next request on the same thread will see the previous request's ThreadLocal value — a severe data leak / security vulnerability.
+> **Thread Pool Memory Leak Hazard**: Because servlet containers (Tomcat, Jetty) recycle threads indefinitely, failing to call `ThreadLocal.remove()` in a `finally` block leaves stale security contexts or tenant identifiers on the thread. The next user routed to that thread will inherit the previous user's credentials!
 
 ---
 
-## 2. Race Conditions — Complete Explanation
-
-A **race condition** occurs when the program's correctness depends on the relative timing or interleaving of operations from multiple threads. The result is non-deterministic and depends on the thread scheduler.
+## 2. Race Conditions & Concurrency Hazards
 
 ### 2.1 Check-Then-Act Race Condition
 
+A Check-Then-Act defect occurs when a thread inspects an invariant, observes it to be valid, and then performs a mutating action—while an interleaved concurrent thread mutates that exact invariant between the check and the act.
+
 ```java
-// ❌ BROKEN — classic check-then-act race condition
+// BROKEN Check-Then-Act Pattern
 @Service
-public class SeatBookingService {
-    private final SeatRepository seatRepository;
+public class VulnerableVoucherService {
+    private final VoucherRepository voucherRepository;
 
-    public void bookSeat(Long seatId, Long userId) {
-        Seat seat = seatRepository.findById(seatId).orElseThrow();
+    public void redeemVoucher(String voucherCode, Long userId) {
+        Voucher voucher = voucherRepository.findByCode(voucherCode)
+            .orElseThrow(() -> new IllegalArgumentException("Invalid voucher"));
 
-        // Thread A checks here — seat is available
-        // Thread B checks here — seat is ALSO available (A hasn't written yet)
-        if (seat.isAvailable()) {
-            // Thread A sets booked
-            // Thread B ALSO sets booked — double booking!
-            seat.setBookedBy(userId);
-            seat.setAvailable(false);
-            seatRepository.save(seat);
+        // Thread 1 checks: voucher.isRedeemed() == false
+        // Thread 2 checks: voucher.isRedeemed() == false (Thread 1 hasn't committed yet!)
+        if (!voucher.isRedeemed()) {
+            voucher.setRedeemed(true);
+            voucher.setRedeemedByUserId(userId);
+            voucherRepository.save(voucher); // Both threads record redemption! Double spend!
         }
     }
 }
-```
-
-**Timeline of the bug:**
-
-```
-Thread A                    Thread B
-READ seat (available=true)
-                            READ seat (available=true)
-CHECK: available? YES
-                            CHECK: available? YES
-seat.setBooked(userA)
-seatRepository.save()
-                            seat.setBooked(userB)
-                            seatRepository.save()  ← OVERWRITES! Double booking!
 ```
 
 ### 2.2 Read-Modify-Write Race Condition
 
+A Read-Modify-Write hazard manifests whenever an operation appears atomic at the source code level (e.g., `count++` or `balance -= amount`) but decompiles into distinct bytecode instructions:
+1. `GETFIELD` (Read value from heap into thread register/operand stack)
+2. `IADD` / `ISUB` (Modify value in register)
+3. `PUTFIELD` (Write updated value back to heap)
+
+```
+Thread 1 (Core 1):  [READ balance: 100]  ──────> [CALC 100 - 20 = 80] ──────> [WRITE 80]
+Thread 2 (Core 2):         [READ balance: 100]  ─────────> [CALC 100 - 30 = 70] ──────> [WRITE 70 (Overwrites 80!)]
+```
+
+The final balance is `70` instead of `50`. $20 of deductions were completely lost due to an uncoordinated write race.
+
+### 2.3 Spring Singleton State Pollution
+
+Developers accustomed to client-side programming often accidentally introduce mutable fields into Spring `@Controller` or `@Service` classes:
+
 ```java
-// ❌ BROKEN — count++ is not atomic
 @RestController
-public class PageViewController {
-    private long pageViews = 0L; // shared mutable state in a singleton!
+@RequestMapping("/api/v1/invoices")
+public class BuggyInvoiceController {
 
-    @GetMapping("/view")
-    public long view() {
-        pageViews++; // READ, INCREMENT, WRITE — not atomic
-        return pageViews;
+    // INSTANCE FIELD IN SINGLETON: Shared by all concurrent HTTP requests!
+    private String clientTaxId;
+    private final List<InvoiceItem> pendingItems = new ArrayList<>();
+
+    @PostMapping("/calculate")
+    public InvoiceSummary calculateTax(@RequestBody InvoiceRequest request) {
+        this.clientTaxId = request.getTaxId(); // Thread 1 sets "US-99", Thread 2 overwrites with "DE-11"
+        this.pendingItems.clear();             // Thread 2 clears Thread 1's items halfway through calculation!
+        this.pendingItems.addAll(request.getItems());
+        return computeSummary(this.clientTaxId, this.pendingItems); // Corrupted data returned!
     }
 }
 ```
 
-Under the JVM, `pageViews++` compiles to roughly:
-```
-GETFIELD pageViews     // load from heap to thread's working memory
-LCONST_1               // push 1
-LADD                   // add
-PUTFIELD pageViews     // write back to heap
-```
-Two threads executing this simultaneously can both read the same old value, both compute old+1, and write it twice — resulting in one lost increment.
+### 2.4 Race Condition Detection & Reproducibility
 
-### 2.3 Race Condition with Spring Singleton Beans
-
-```java
-// ❌ A realistic Spring bug: state held in a @Service singleton
-@Service
-public class ReportService {
-    // ⚠️ Instance variable — shared across all threads!
-    private List<String> currentReportLines = new ArrayList<>();
-
-    public List<String> generateReport(List<Order> orders) {
-        currentReportLines.clear(); // Thread A clears; Thread B's data gone!
-        for (Order order : orders) {
-            currentReportLines.add(formatOrder(order)); // concurrent add to non-thread-safe list
-        }
-        return new ArrayList<>(currentReportLines);
-    }
-
-    private String formatOrder(Order o) {
-        return o.getId() + ": " + o.getTotal();
-    }
-}
-```
-
-**Fix — use local variables:**
-
-```java
-@Service
-public class ReportService {
-    // ✅ No instance state — all state is method-local (thread-safe)
-    public List<String> generateReport(List<Order> orders) {
-        List<String> lines = new ArrayList<>(); // local — lives on stack per thread
-        for (Order order : orders) {
-            lines.add(formatOrder(order));
-        }
-        return lines;
-    }
-
-    private String formatOrder(Order o) {
-        return o.getId() + ": " + o.getTotal();
-    }
-}
-```
-
-### 2.4 Detecting Race Conditions
-
-| Technique | How |
-|---|---|
-| **Code review** | Look for mutable instance fields in singleton beans |
-| **Thread Sanitizer** | Available in native compilers; limited JVM support |
-| **Java PathFinder** | NASA model checker for Java concurrency |
-| **Load testing** | JMeter/Gatling with high concurrency uncovers symptoms |
-| **Logging with thread name** | `[Thread-1] count=99, [Thread-1] count=99` — duplicate values |
-| **AtomicInteger as oracle** | Compare AtomicInteger with plain int under same load |
+Race conditions are notoriously difficult to reproduce in unit tests because standard JUnit test execution runs sequentially on a single thread. To test concurrency under load:
+1. **`java.util.concurrent.CountDownLatch` Barrier**: Align multiple test threads at a starting gate so they simultaneously bombard the target method.
+2. **`CompletableFuture.allOf(...)` Load Injections**: Fire batches of 1,000 asynchronous invocations against a local embedded database.
+3. **Chaos Monkey / Jepsen Testing**: Introduce simulated network jitter and lock wait latency into lower database drivers.
 
 ---
 
-## 3. Synchronization in Java
+## 3. Multi-Approach: In-Process Thread Synchronization Strategies
 
-### 3.1 `synchronized` Keyword
+When mutable in-memory state must be coordinated inside a single Spring Boot JVM instance, architects have five distinct approaches available.
 
-`synchronized` ensures **mutual exclusion** (only one thread executes the block at a time) and **visibility** (changes made inside are visible to the next thread that acquires the lock).
+```
+                    IN-PROCESS SYNCHRONIZATION SPECTRUM
+ Low Contention                                            High Contention
+ Low Complexity                                            High Complexity
+       │                                                         │
+       ▼                                                         ▼
+[Approach 1]        [Approach 5]        [Approach 4]       [Approach 3]       [Approach 2]
+Stateless Design  Synchronized Monitor Concurrent Collections Explicit Locks  Lock-Free CAS
+(Stack Confinement) (Private Lock)       (ConcurrentHashMap) (Reentrant/ReadWrite) (LongAdder/CAS)
+```
 
-**Method-level synchronization — locks on `this`:**
+---
+
+### Approach 1: Stateless Architecture (Stack Confinement & Immutability)
+
+#### Scenario
+Standard production Spring Boot web microservices handling high-throughput REST APIs, business validation, and database orchestration where state transitions belong inside databases, distributed caches, or request payloads.
+
+#### Use-Case
+User registration, shopping cart calculations, payment checkout processing, and reporting where each request carries all necessary parameters, transforms them locally, and commits them to persistent storage.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: 100% thread-safe without locks; zero CPU synchronization overhead; immune to deadlocks and race conditions; scales linearly across CPU cores.
+- **Trade-offs**: Cannot maintain persistent in-memory state across multiple HTTP requests on the same node without querying external state stores (Redis/PostgreSQL).
+
+#### Well-Documented Code Example
 
 ```java
-@Service
-public class SafeCounterService {
-    private int count = 0;
+package com.example.service.impl;
 
-    // Lock acquired on 'this' instance
-    public synchronized void increment() {
-        count++;
+import com.example.dto.OrderRequest;
+import com.example.dto.OrderResponse;
+import com.example.entity.Order;
+import com.example.repository.OrderRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Objects;
+
+/**
+ * Approach 1: Fully Stateless Service
+ * All dependencies are immutable (final) and all state lives inside method stack frames.
+ */
+@Service
+public class StatelessOrderService {
+
+    // Injected dependencies are immutable references
+    private final OrderRepository orderRepository;
+    private final TaxCalculationClient taxClient;
+
+    public StatelessOrderService(OrderRepository orderRepository, TaxCalculationClient taxClient) {
+        this.orderRepository = Objects.requireNonNull(orderRepository, "Repository must not be null");
+        this.taxClient = Objects.requireNonNull(taxClient, "TaxClient must not be null");
     }
 
-    public synchronized int getCount() {
-        return count;
+    @Transactional
+    public OrderResponse processOrder(final OrderRequest request) {
+        // Stack confinement: request, taxRate, total, and newOrder live strictly on THIS thread's stack
+        BigDecimal taxRate = taxClient.fetchTaxRate(request.getZipCode());
+        BigDecimal subtotal = request.getItems().stream()
+            .map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal grandTotal = subtotal.add(subtotal.multiply(taxRate));
+
+        // Create new instance; no shared mutable instance variables
+        Order newOrder = new Order(request.getCustomerId(), grandTotal, List.copyOf(request.getItems()));
+        Order savedOrder = orderRepository.save(newOrder);
+
+        return new OrderResponse(savedOrder.getId(), savedOrder.getTotal(), savedOrder.getStatus());
     }
 }
 ```
 
-**Block-level synchronization — preferred for finer granularity:**
+---
+
+### Approach 2: Hardware-Level Compare-And-Swap (CAS) & Scalable Adders
+
+#### Scenario
+High-throughput telemetry, real-time counters, metrics collection, or rate counters where thousands of concurrent threads update numerical counters or state machines simultaneously.
+
+#### Use-Case
+Tracking active API connections, aggregating total latency across incoming servlet requests, implementing an atomic state machine transition (`INITIALIZING` -> `RUNNING` -> `SHUTTING_DOWN`).
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Non-blocking lock-free execution backed directly by CPU hardware instructions (`CMPXCHG`); no thread context switching or kernel transitions. Under extreme write contention, `LongAdder` distributes increments across internal CPU cache-line aligned cell buffers.
+- **Trade-offs**: Complex compound operations (updating two independent counters simultaneously) cannot be executed atomically with a single CAS variable; `LongAdder` consumes more memory than a primitive long.
+
+#### Well-Documented Code Example
 
 ```java
-@Service
-public class InventoryService {
-    private final Map<String, Integer> stock = new HashMap<>();
-    private final Object stockLock = new Object(); // dedicated lock object
+package com.example.concurrency.metrics;
 
-    public void updateStock(String productId, int delta) {
-        synchronized (stockLock) {  // only locks what's needed
-            stock.merge(productId, delta, Integer::sum);
-        }
-        // Other non-stock operations proceed concurrently
-        notifyWarehouse(productId);
+import org.springframework.stereotype.Component;
+
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
+
+/**
+ * Approach 2: Non-blocking CAS Atomics & LongAdders
+ */
+@Component
+public class HighThroughputMetricsRegistry {
+
+    // Scalable counter: eliminates memory bus contention under thousands of concurrent threads
+    private final LongAdder totalProcessedRequests = new LongAdder();
+    private final LongAdder totalExecutionTimeMs = new LongAdder();
+
+    // AtomicInteger: perfect for tracking active live connections with exact increment/decrement
+    private final AtomicInteger activeConnections = new AtomicInteger(0);
+
+    // AtomicReference: atomic state machine transitions without locks
+    public enum EngineState { STOPPED, STARTING, RUNNING, FAULTED }
+    private final AtomicReference<EngineState> engineState = new AtomicReference<>(EngineState.STOPPED);
+
+    public void recordInvocation(long durationMs) {
+        totalProcessedRequests.increment();      // Stripped cell write; 10x faster than AtomicLong under contention
+        totalExecutionTimeMs.add(durationMs);
     }
 
-    private void notifyWarehouse(String productId) {
-        // ... HTTP call, doesn't need stockLock
+    public int onConnectionOpened() {
+        return activeConnections.incrementAndGet(); // Returns exact integer value atomically
+    }
+
+    public int onConnectionClosed() {
+        return activeConnections.decrementAndGet();
+    }
+
+    public boolean transitionToRunning() {
+        // Compare-And-Set: Only updates to RUNNING if and only if current value is exactly STARTING
+        return engineState.compareAndSet(EngineState.STARTING, EngineState.RUNNING);
+    }
+
+    public double getAverageLatencyMs() {
+        long count = totalProcessedRequests.sum();
+        return count == 0 ? 0.0 : (double) totalExecutionTimeMs.sum() / count;
     }
 }
 ```
 
-> [!WARNING]
-> Synchronizing on `this` in a Spring bean can cause issues if the bean is accessed via a proxy (e.g., `@Transactional`). The proxy wraps the bean, and external callers lock on the **proxy object**, not `this` — the lock is ineffective. Always use a **private dedicated lock object** or use `java.util.concurrent` tools.
+---
 
-### 3.2 `volatile` Keyword — What It Does and Doesn't Do
+### Approach 3: Explicit Lock Primitives (ReentrantLock & ReadWriteLock & StampedLock)
 
-`volatile` solves **visibility** but NOT **atomicity**.
+#### Scenario
+Complex critical sections requiring timed lock acquisition (`tryLock(timeout)`), fairness policies, multiple condition variables (`await()` / `signal()`), or highly read-skewed in-memory data structures (95% reads, 5% writes).
 
-```java
-// volatile guarantees:
-// 1. Writes are immediately flushed to main memory
-// 2. Reads always come from main memory (not CPU cache)
-// volatile does NOT guarantee compound operations are atomic
+#### Use-Case
+Local memory cache invalidation, synchronizing physical hardware connectors, coordinating thread pools with graceful draining, or large in-memory lookup maps where read operations must execute concurrently without blocking each other.
 
-public class ConfigManager {
-    private volatile boolean featureEnabled = false; // safe for single write, multiple reads
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Fine-grained control; supports non-blocking polling, timed acquisition (preventing deadlocks), and separate read/write lock capabilities. `StampedLock` supports lock-free optimistic reading.
+- **Trade-offs**: Manual lock management is error-prone; forgetting to release the lock in a `finally` block creates a permanent deadlock; higher memory overhead per lock instance.
 
-    public void enable()  { featureEnabled = true;  } // atomic single write — safe
-    public void disable() { featureEnabled = false; } // atomic single write — safe
-    public boolean isEnabled() { return featureEnabled; } // safe read
-
-    // ❌ NOT safe — read-modify-write is still not atomic
-    private volatile int counter = 0;
-    public void increment() { counter++; } // STILL a race condition!
-}
-```
-
-| | `volatile` | `synchronized` | `AtomicInteger` |
-|---|---|---|---|
-| Visibility guarantee | ✅ | ✅ | ✅ |
-| Atomicity (compound ops) | ❌ | ✅ | ✅ (specific ops) |
-| Mutual exclusion | ❌ | ✅ | ❌ (lock-free) |
-| Performance | Fast | Moderate (blocking) | Fast (CAS) |
-
-### 3.3 `java.util.concurrent` Overview
-
-The `java.util.concurrent` (JUC) package provides high-level, production-grade concurrency utilities:
-
-```
-java.util.concurrent
-├── Executors & Thread Pools  (ExecutorService, ThreadPoolExecutor, ScheduledExecutorService)
-├── Synchronizers             (CountDownLatch, CyclicBarrier, Semaphore, Phaser, Exchanger)
-├── Atomic Variables          (AtomicInteger, AtomicLong, AtomicReference, LongAdder)
-├── Locks                     (ReentrantLock, ReadWriteLock, StampedLock)
-├── Concurrent Collections    (ConcurrentHashMap, CopyOnWriteArrayList, BlockingQueue variants)
-└── Futures                   (Future, CompletableFuture, ForkJoinPool)
-```
-
-### 3.4 ReentrantLock and ReadWriteLock
+#### Well-Documented Code Example
 
 ```java
+package com.example.concurrency.locks;
+
+import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+/**
+ * Approach 3: Explicit ReentrantLock and ReadWriteLock
+ */
 @Service
-public class CacheService {
-    private final Map<String, String> cache = new HashMap<>();
+public class ControlledAccessBufferService {
+
+    // Fair lock ensures First-In, First-Out (FIFO) queue for critical hardware access
+    private final ReentrantLock hardwareLock = new ReentrantLock(true);
+
+    // ReadWriteLock for read-heavy in-memory cache
+    private final Map<String, String> internalCache = new HashMap<>();
     private final ReadWriteLock rwLock = new ReentrantReadWriteLock();
-    private final Lock readLock  = rwLock.readLock();
+    private final Lock readLock = rwLock.readLock();
     private final Lock writeLock = rwLock.writeLock();
 
-    // Multiple readers concurrently — no blocking between them
-    public String get(String key) {
-        readLock.lock();
+    /**
+     * Non-blocking timed lock attempt to prevent application thread starvation.
+     */
+    public boolean executeHardwareCommand(String command, long timeoutSeconds) {
         try {
-            return cache.get(key);
-        } finally {
-            readLock.unlock(); // ALWAYS unlock in finally!
+            // Attempt to acquire lock within window; returns false if unavailable
+            if (!hardwareLock.tryLock(timeoutSeconds, TimeUnit.SECONDS)) {
+                return false; // Safely back off without thread blocking
+            }
+            try {
+                // Execute delicate critical section
+                dispatchToPhysicalPort(command);
+                return true;
+            } finally {
+                // MANDATORY: Always unlock inside finally block
+                hardwareLock.unlock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // Restore interrupted status
+            throw new IllegalStateException("Thread interrupted while waiting for lock", e);
         }
     }
 
-    // Exclusive write — blocks all readers and other writers
-    public void put(String key, String value) {
+    /**
+     * Concurrent readers execute simultaneously without blocking each other.
+     */
+    public String getCachedValue(String key) {
+        readLock.lock();
+        try {
+            return internalCache.get(key);
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    /**
+     * Writers acquire exclusive access, blocking all concurrent readers and writers.
+     */
+    public void putCachedValue(String key, String value) {
         writeLock.lock();
         try {
-            cache.put(key, value);
+            internalCache.put(key, value);
         } finally {
             writeLock.unlock();
         }
     }
-}
-```
 
-**ReentrantLock advantages over `synchronized`:**
-
-```java
-@Service
-public class AdvancedLockService {
-    private final ReentrantLock lock = new ReentrantLock(true); // fair lock
-
-    public boolean tryUpdate(String data, long timeoutMs) throws InterruptedException {
-        // tryLock — non-blocking attempt with timeout
-        if (lock.tryLock(timeoutMs, TimeUnit.MILLISECONDS)) {
-            try {
-                performUpdate(data);
-                return true;
-            } finally {
-                lock.unlock();
-            }
-        }
-        return false; // couldn't acquire lock in time
-    }
-
-    private void performUpdate(String data) { /* ... */ }
-}
-```
-
-| Feature | `synchronized` | `ReentrantLock` |
-|---|---|---|
-| Fairness | No | Optional (`new ReentrantLock(true)`) |
-| Timed lock attempt | No | `tryLock(timeout, unit)` |
-| Interruptible lock | No | `lockInterruptibly()` |
-| Multiple conditions | One (wait/notify) | `newCondition()` — unlimited |
-| Lock info / debugging | No | `isLocked()`, `getQueueLength()` |
-
-### 3.5 Atomic Variables
-
-Atomic variables use **Compare-And-Swap (CAS)** — a hardware instruction that atomically checks a memory location and updates it only if it hasn't changed:
-
-```java
-@Service
-public class MetricsService {
-    private final AtomicInteger requestCount  = new AtomicInteger(0);
-    private final AtomicLong    totalLatency  = new AtomicLong(0L);
-    private final LongAdder     errorCount    = new LongAdder(); // better under high contention
-
-    public void recordRequest(long latencyMs) {
-        requestCount.incrementAndGet();       // atomic increment, returns new value
-        totalLatency.addAndGet(latencyMs);    // atomic add
-    }
-
-    public void recordError() {
-        errorCount.increment(); // LongAdder: uses striped cells — less contention than AtomicLong
-    }
-
-    public double getAverageLatency() {
-        int count = requestCount.get();
-        return count == 0 ? 0 : (double) totalLatency.get() / count;
-    }
-
-    // CAS example — set only if current value matches expected
-    private final AtomicReference<String> status = new AtomicReference<>("IDLE");
-
-    public boolean transitionToRunning() {
-        return status.compareAndSet("IDLE", "RUNNING"); // atomic check-and-set
+    private void dispatchToPhysicalPort(String cmd) {
+        // Low-level port communication
     }
 }
 ```
-
-> [!TIP]
-> Use `LongAdder` instead of `AtomicLong` for **high-contention counters** (e.g., request counters). `LongAdder` maintains an array of cells and reduces CAS contention. Call `.sum()` to get the total. Throughput can be **10x better** under high load.
-
-### 3.6 ConcurrentHashMap vs HashMap vs Collections.synchronizedMap
-
-```java
-@Service
-public class SessionStore {
-
-    // ❌ HashMap — NOT thread-safe. Can cause infinite loops in Java 7,
-    //    data corruption in Java 8+
-    private final Map<String, Session> bad = new HashMap<>();
-
-    // ⚠️ Collections.synchronizedMap — wraps entire map in synchronized.
-    //    Every operation (get, put, size, iterator) locks the entire map.
-    //    Iterating requires manual synchronization!
-    private final Map<String, Session> coarse = Collections.synchronizedMap(new HashMap<>());
-
-    // ✅ ConcurrentHashMap — segment-level locking (Java 7) / CAS + synchronized per bucket (Java 8+)
-    //    Reads are lock-free. Writes lock only the affected bucket.
-    //    Null keys/values NOT allowed.
-    private final Map<String, Session> best = new ConcurrentHashMap<>();
-
-    public void store(String token, Session session) {
-        best.put(token, session);
-    }
-
-    // ✅ Atomic compound operation — putIfAbsent, computeIfAbsent, merge
-    public Session getOrCreate(String token) {
-        return best.computeIfAbsent(token, k -> new Session(k)); // atomic!
-    }
-
-    public void updateExpiry(String token, Instant newExpiry) {
-        // compute is atomic — entire lambda runs under lock for the key
-        best.compute(token, (k, existing) -> {
-            if (existing == null) return null;
-            existing.setExpiry(newExpiry);
-            return existing;
-        });
-    }
-}
-```
-
-| | `HashMap` | `synchronizedMap` | `ConcurrentHashMap` |
-|---|---|---|---|
-| Thread-safe | ❌ | ✅ (coarse lock) | ✅ (fine-grained) |
-| Read concurrency | ❌ | ❌ (blocks) | ✅ (lock-free reads) |
-| Null keys/values | ✅ | ✅ | ❌ |
-| Iteration | Fail-fast | Must sync externally | Weakly consistent |
-| Performance (high concurrency) | N/A | Poor | Excellent |
 
 ---
 
-## 4. @Async Deep Dive
+### Approach 4: Thread-Safe Concurrent Collections & Atomic Lambdas
 
-### 4.1 @EnableAsync — What It Does
+#### Scenario
+Shared in-memory state requiring high concurrency across thousands of requests without coarse lock boundaries, such as active session stores, WebSocket registry maps, or local debounce caches.
 
-`@EnableAsync` triggers a **BeanPostProcessor** (`AsyncAnnotationBeanPostProcessor`) that wraps `@Async`-annotated beans in an AOP proxy. When an async method is called, the proxy submits the method invocation to a `TaskExecutor` rather than executing it inline.
+#### Use-Case
+Tracking connected WebSocket users per tenant, debouncing rapid duplicate HTTP submissions, or computing expensive calculations on first cache miss.
 
-```java
-@Configuration
-@EnableAsync
-public class AsyncConfig {
-    // Without @EnableAsync, @Async annotations are silently ignored!
-}
-```
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Lock striping (bucket-level locking on writes) and lock-free volatile reads; atomic mutation methods (`computeIfAbsent`, `computeIfPresent`, `merge`) execute compound check-then-act operations atomically without external locks.
+- **Trade-offs**: Does not allow null keys or values; aggregations like `size()` or `isEmpty()` represent weakly consistent snapshots under ongoing writes.
 
-### 4.2 @Async Method Requirements
+#### Well-Documented Code Example
 
 ```java
+package com.example.concurrency.collections;
+
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+/**
+ * Approach 4: High-Performance Concurrent Collections with Atomic Mutators
+ */
 @Service
-public class EmailService {
+public class TenantSessionRegistry {
 
-    // ✅ Correct — public method, returns CompletableFuture
-    @Async
-    public CompletableFuture<Void> sendWelcomeEmail(String to) {
-        // ... send email
-        return CompletableFuture.completedFuture(null);
+    public record SessionInfo(String sessionId, String userId, Instant lastActive) {}
+
+    // ConcurrentHashMap provides bucket-level synchronization on writes and lock-free reads
+    private final ConcurrentMap<String, SessionInfo> sessionMap = new ConcurrentHashMap<>();
+
+    /**
+     * Atomic Check-Then-Act: Ensures only ONE session object is instantiated and stored,
+     * even if 100 concurrent threads invoke this method simultaneously for the same token.
+     */
+    public SessionInfo getOrCreateSession(String token, String userId) {
+        return sessionMap.computeIfAbsent(token, key -> {
+            // Expensive initialization executes exactly once per distinct key
+            return new SessionInfo(key, userId, Instant.now());
+        });
     }
 
-    // ❌ TRAP 1: private methods — proxy cannot intercept
-    @Async
-    private void sendPrivateEmail(String to) { /* silently runs synchronously! */ }
-
-    // ❌ TRAP 2: self-invocation — calling @Async from the same bean bypasses proxy
-    public void process() {
-        sendWelcomeEmail("user@example.com"); // ← calls THIS.sendWelcomeEmail
-        // → calls the real method directly, NOT via proxy → runs SYNCHRONOUSLY!
+    /**
+     * Atomic In-Place Mutation: Modifies existing session metadata atomically without external lock.
+     */
+    public SessionInfo refreshSessionActivity(String token) {
+        return sessionMap.computeIfPresent(token, (key, existing) -> 
+            new SessionInfo(existing.sessionId(), existing.userId(), Instant.now())
+        );
     }
 
-    // ❌ TRAP 3: @Async on a @Bean-less class (not managed by Spring)
-    // Annotation is ignored if Spring doesn't manage the bean
-}
-```
-
-> [!IMPORTANT]
-> **Self-invocation is the #1 `@Async` gotcha.** If method `A()` and `@Async B()` are in the same class and `A()` calls `B()`, it calls the target object directly, bypassing the AOP proxy. The async behavior is silently lost. Fix: inject the bean into itself (Spring 4.3+) or move the async method to a separate bean.
-
-**Fix for self-invocation:**
-
-```java
-@Service
-public class NotificationService {
-    @Autowired
-    private NotificationService self; // inject own proxy!
-
-    public void notifyAll(List<String> emails) {
-        emails.forEach(email -> self.sendAsync(email)); // goes through proxy → truly async
-    }
-
-    @Async
-    public CompletableFuture<Void> sendAsync(String email) {
-        // async work
-        return CompletableFuture.completedFuture(null);
+    /**
+     * Atomic Remove: Guarantees eviction only occurs if value matches expected state.
+     */
+    public boolean evictSession(String token, SessionInfo expectedSession) {
+        return sessionMap.remove(token, expectedSession);
     }
 }
 ```
 
-### 4.3 Default Thread Pool — The SimpleAsyncTaskExecutor Trap
+---
 
-> [!CAUTION]
-> **Critical production trap:** If you do NOT configure a custom `TaskExecutor`, Spring uses `SimpleAsyncTaskExecutor` by default. This executor **creates a new thread for every single async call**. There is **no thread pool, no queue, no backpressure**. Under load, your application will create thousands of threads and OOM.
+### Approach 5: Intrinsic Monitor Synchronization with Dedicated Private Lock Monitors
 
-```java
-// What SimpleAsyncTaskExecutor effectively does internally:
-public class SimpleAsyncTaskExecutor implements AsyncTaskExecutor {
-    @Override
-    public void execute(Runnable task) {
-        Thread thread = new Thread(task); // NEW THREAD EVERY TIME — no pooling!
-        thread.start();
-    }
-}
-```
+#### Scenario
+Legacy maintenance, simple synchronization of compound operations within a single class, or where Spring AOP proxy interception makes `synchronized(this)` hazardous.
 
-**Proof it's a trap:**
+#### Use-Case
+Serializing execution of an internal queue drainer or protecting a shared third-party legacy SDK object that is inherently not thread-safe.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Clean syntax supported natively by Java keywords; automatically unlocks when exceptions are thrown (no manual `finally` block needed).
+- **Trade-offs**: Unbounded blocking (no timeout support); cannot interrupt waiting threads; prone to proxy bugs if locking on `this`.
+
+#### Well-Documented Code Example
 
 ```java
-@RestController
-public class DemoController {
-    @Autowired EmailService emailService;
+package com.example.concurrency.intrinsic;
 
-    @GetMapping("/send-bulk")
-    public String sendBulk() throws Exception {
-        for (int i = 0; i < 10_000; i++) {
-            emailService.sendEmail("user" + i + "@example.com");
-            // With SimpleAsyncTaskExecutor: 10,000 threads created!
-            // Default OS thread stack: ~512KB - 1MB each
-            // → 10GB of memory just for thread stacks → OutOfMemoryError
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayDeque;
+import java.util.Queue;
+
+/**
+ * Approach 5: Dedicated Private Lock Monitor Pattern
+ * NEVER use 'synchronized(this)' in Spring beans because proxies wrap 'this'.
+ */
+@Component
+public class SafeLegacyBridgeService {
+
+    // Private final monitor object: Outside code cannot lock on it or cause accidental deadlocks
+    private final Object monitor = new Object();
+    private final Queue<String> internalQueue = new ArrayDeque<>();
+
+    public void enqueuePayload(String payload) {
+        synchronized (monitor) {
+            internalQueue.offer(payload);
+            // Intrinsic condition notification
+            monitor.notifyAll();
         }
-        return "sent";
+    }
+
+    public String drainNextPayload() throws InterruptedException {
+        synchronized (monitor) {
+            while (internalQueue.isEmpty()) {
+                // Releases monitor lock and suspends thread until notified
+                monitor.wait();
+            }
+            return internalQueue.poll();
+        }
     }
 }
 ```
 
-### 4.4 Configuring a Proper ThreadPoolTaskExecutor
+---
+
+### In-Process Synchronization Comparison Matrix
+
+| Synchronization Strategy | Concurrency Model | CPU Contention Overhead | Timeout Support | Safe with Spring Proxies? | Primary Use-Case |
+|---|---|---|---|---|---|
+| **Approach 1: Stateless** | None (Isolated Stacks) | **Zero** | N/A | **Yes** (100% Safe) | Web APIs, Business Logic, Repositories |
+| **Approach 2: CAS / Scalable Atomics** | Lock-Free Hardware CAS | **Extremely Low** | No | **Yes** | High-throughput Counters, Metrics, Status Flags |
+| **Approach 3: Explicit Locks** | Lock-Based (Kernel / ThreadPark) | Moderate to High | **Yes** (`tryLock`) | **Yes** | Complex critical blocks, Read-heavy caches |
+| **Approach 4: Concurrent Collections** | Bucket-level CAS / Locks | **Low** | No | **Yes** | Shared in-memory session/cache tables |
+| **Approach 5: Private Monitor** | Intrinsic JVM Monitors | Moderate | No | **Yes** (With private object) | Simple critical blocks, legacy queue bridges |
+
+---
+
+## 4. Multi-Approach: Asynchronous Task Execution Architectures
+
+When long-running work (generating PDF invoices, sending bulk transactional emails, firing third-party webhooks) must be decoupled from the incoming HTTP servlet request thread, Spring Boot provides four distinct architectural approaches.
+
+---
+
+### Approach 1: Declarative `@Async` with Custom `ThreadPoolTaskExecutor`
+
+#### Scenario
+Standard Spring Boot enterprise applications requiring clean, declarative decoupling of background tasks while retaining full Spring dependency injection and AOP interception.
+
+#### Use-Case
+Sending email receipts upon checkout, auditing security events to append-only logs, and asynchronous notifications.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Clean annotation-driven design (`@Async`); seamless integration with Spring's exception handling and transaction managers.
+- **Trade-offs**: Subject to Spring AOP self-invocation traps; requires explicit configuration of a custom `ThreadPoolTaskExecutor` (the default `SimpleAsyncTaskExecutor` creates unbounded threads and crashes JVMs under load).
+
+#### Well-Documented Code Example
 
 ```java
+package com.example.async.config;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.AsyncConfigurer;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.lang.reflect.Method;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
+
+/**
+ * Production-ready ThreadPoolTaskExecutor configuration for @Async.
+ */
 @Configuration
 @EnableAsync
-public class AsyncConfig implements AsyncConfigurer {
+public class AsyncThreadPoolConfig implements AsyncConfigurer {
 
-    @Bean(name = "taskExecutor")
-    public ThreadPoolTaskExecutor taskExecutor() {
+    private static final Logger log = LoggerFactory.getLogger(AsyncThreadPoolConfig.class);
+
+    @Override
+    @Bean(name = "productionTaskExecutor")
+    public Executor getAsyncExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-
-        // Core pool: always-alive threads (like a standing workforce)
+        // 1. Core Pool: standing pool of worker threads
         executor.setCorePoolSize(10);
-
-        // Max pool: upper thread limit (only created when queue is full)
+        // 2. Queue Capacity: tasks wait here while core threads are busy
+        executor.setQueueCapacity(250);
+        // 3. Max Pool: only spawned when queue capacity is 100% saturated
         executor.setMaxPoolSize(50);
-
-        // Queue: holds tasks when all core threads are busy
-        executor.setQueueCapacity(200);
-
-        // Thread name prefix for debugging/monitoring
-        executor.setThreadNamePrefix("async-worker-");
-
-        // What to do when maxPoolSize AND queue are both full
+        // 4. Rejection Policy: CallerRuns provides backpressure by running task on HTTP thread
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-
-        // Wait for queued tasks to finish before shutdown
+        // 5. Thread Naming: critical for identifying workers in log traces
+        executor.setThreadNamePrefix("async-worker-");
+        // 6. Graceful Shutdown: finish in-flight tasks when SIGTERM received
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
 
@@ -703,232 +648,428 @@ public class AsyncConfig implements AsyncConfigurer {
         return executor;
     }
 
-    // This makes it the DEFAULT executor for all @Async methods
-    @Override
-    public Executor getAsyncExecutor() {
-        return taskExecutor();
-    }
-
     @Override
     public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
-        return new CustomAsyncExceptionHandler();
+        return (Throwable ex, Method method, Object... params) -> {
+            log.error("Unhandled async error in method [{}], Params: {}", method.getName(), params, ex);
+        };
     }
 }
 ```
 
-**Multiple named executors for different workloads:**
-
 ```java
-@Configuration
-@EnableAsync
-public class MultiExecutorConfig {
+package com.example.async.service;
 
-    @Bean("emailExecutor")
-    public ThreadPoolTaskExecutor emailExecutor() {
-        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-        exec.setCorePoolSize(5);
-        exec.setMaxPoolSize(20);
-        exec.setQueueCapacity(100);
-        exec.setThreadNamePrefix("email-");
-        exec.initialize();
-        return exec;
-    }
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
 
-    @Bean("reportExecutor")
-    public ThreadPoolTaskExecutor reportExecutor() {
-        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-        exec.setCorePoolSize(2);  // reports are heavy, fewer threads
-        exec.setMaxPoolSize(5);
-        exec.setQueueCapacity(10);
-        exec.setThreadNamePrefix("report-");
-        exec.initialize();
-        return exec;
-    }
-}
+import java.util.concurrent.CompletableFuture;
 
 @Service
-public class NotificationService {
+public class OrderNotificationService {
 
-    @Async("emailExecutor")  // uses specific named executor
-    public CompletableFuture<Void> sendEmail(String to) { /* ... */ return CompletableFuture.completedFuture(null); }
+    private static final Logger log = LoggerFactory.getLogger(OrderNotificationService.class);
 
-    @Async("reportExecutor") // uses different pool
-    public CompletableFuture<byte[]> generateReport(Long reportId) { /* ... */ return CompletableFuture.completedFuture(new byte[0]); }
-}
-```
-
-### 4.5 Return Types for @Async
-
-```java
-@Service
-public class AsyncReturnTypesDemo {
-
-    // 1. void — fire-and-forget. Caller cannot observe result or exceptions.
-    @Async
-    public void fireAndForget(String data) {
-        process(data);
-        // Any exception here is caught by AsyncUncaughtExceptionHandler
-    }
-
-    // 2. Future<T> — old-style, blocking get()
-    @Async
-    public Future<String> legacyAsync(String input) {
-        String result = process(input);
-        return new AsyncResult<>(result); // Spring's Future wrapper
-    }
-
-    // 3. CompletableFuture<T> — modern, composable, non-blocking
-    @Async
-    public CompletableFuture<String> modernAsync(String input) {
+    @Async("productionTaskExecutor")
+    public CompletableFuture<Boolean> sendOrderConfirmationEmailAsync(String emailAddress, Long orderId) {
+        log.info("Sending confirmation email for order [{}] to [{}] on thread [{}]", 
+            orderId, emailAddress, Thread.currentThread().getName());
         try {
-            String result = process(input);
-            return CompletableFuture.completedFuture(result);
-        } catch (Exception e) {
+            // Simulate external email gateway network latency
+            Thread.sleep(500);
+            return CompletableFuture.completedFuture(true);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             return CompletableFuture.failedFuture(e);
         }
     }
-
-    // 4. ListenableFuture — Spring's old callback-based future (deprecated in 6.x)
-    // Avoid in new code. Use CompletableFuture instead.
-
-    private String process(String input) { return input.toUpperCase(); }
 }
 ```
 
-### 4.6 Exception Handling in @Async
+---
+
+### Approach 2: Programmatic Pipeline Composition via `CompletableFuture`
+
+#### Scenario
+Complex orchestration where a single service method must dispatch multiple parallel asynchronous outbound requests (e.g., querying 3 third-party payment providers simultaneously) and combine their results.
+
+#### Use-Case
+Aggregating account dashboards (fetching balances, recent transactions, reward points, and credit score simultaneously from distinct microservices).
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Rich functional composition API (`thenApply`, `thenCompose`, `thenCombine`, `allOf`, `anyOf`); explicit error recovery via `exceptionally` and `handle`; immune to Spring proxy self-invocation bugs.
+- **Trade-offs**: Complex exception wrapping (`CompletionException`); requires passing explicit custom executors to prevent falling back to the shared `ForkJoinPool.commonPool()`.
+
+#### Well-Documented Code Example
 
 ```java
-// For void return type — implement AsyncUncaughtExceptionHandler
-public class CustomAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
+package com.example.async.pipeline;
 
-    private static final Logger log = LoggerFactory.getLogger(CustomAsyncExceptionHandler.class);
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Service;
 
-    @Override
-    public void handleUncaughtException(Throwable ex, Method method, Object... params) {
-        log.error("Async exception in method '{}' with params {}: {}",
-            method.getName(), Arrays.toString(params), ex.getMessage(), ex);
-        // optionally: send alert, write to dead-letter queue, etc.
-    }
-}
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
-// For CompletableFuture — handle in the future chain
 @Service
-public class RobustAsyncService {
+public class AggregatedDashboardService {
 
-    @Async
-    public CompletableFuture<String> riskyOperation(String input) {
-        if (input == null) {
-            return CompletableFuture.failedFuture(new IllegalArgumentException("input is null"));
-        }
-        return CompletableFuture.completedFuture(input.toUpperCase());
+    public record DashboardSummary(String userProfile, String balance, String creditScore) {}
+
+    private final Executor productionTaskExecutor;
+
+    public AggregatedDashboardService(@Qualifier("productionTaskExecutor") Executor executor) {
+        this.productionTaskExecutor = executor;
     }
-}
 
-// In the caller:
-@RestController
-public class DemoController {
-    @Autowired RobustAsyncService asyncService;
+    public CompletableFuture<DashboardSummary> loadUserDashboardAsync(Long userId) {
+        // Step 1: Fire three parallel requests using our custom thread pool
+        CompletableFuture<String> profileFuture = CompletableFuture.supplyAsync(
+            () -> fetchProfile(userId), productionTaskExecutor
+        );
 
-    @GetMapping("/async")
-    public CompletableFuture<ResponseEntity<String>> handleAsync(@RequestParam String input) {
-        return asyncService.riskyOperation(input)
-            .thenApply(result -> ResponseEntity.ok(result))
-            .exceptionally(ex -> ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body("Error: " + ex.getMessage()));
+        CompletableFuture<String> balanceFuture = CompletableFuture.supplyAsync(
+            () -> fetchBalance(userId), productionTaskExecutor
+        );
+
+        CompletableFuture<String> creditScoreFuture = CompletableFuture.supplyAsync(
+            () -> fetchCreditScore(userId), productionTaskExecutor
+        ).exceptionally(ex -> "Score Unavailable"); // Fallback on partial failure
+
+        // Step 2: Combine all three futures when all finish
+        return CompletableFuture.allOf(profileFuture, balanceFuture, creditScoreFuture)
+            .thenApply(voidResult -> new DashboardSummary(
+                profileFuture.join(),
+                balanceFuture.join(),
+                creditScoreFuture.join()
+            ));
     }
+
+    private String fetchProfile(Long id) { return "Profile-Data-" + id; }
+    private String fetchBalance(Long id) { return "$1,500.00"; }
+    private String fetchCreditScore(Long id) { return "780"; }
 }
 ```
 
-### 4.7 @Async with @Transactional
+---
 
-```java
-@Service
-public class OrderService {
+### Approach 3: Java 21 / Spring Boot 3.2+ Virtual Threads (Project Loom)
 
-    // ✅ Each @Async invocation runs in its OWN transaction
-    // The transaction starts on the async thread's context — not the caller's
-    @Async
-    @Transactional
-    public CompletableFuture<Void> processOrderAsync(Long orderId) {
-        // This runs in a NEW transaction on a new thread
-        // The caller's transaction (if any) is NOT joined
-        Order order = orderRepository.findById(orderId).orElseThrow();
-        order.setStatus(OrderStatus.PROCESSING);
-        orderRepository.save(order);
-        return CompletableFuture.completedFuture(null);
-    }
+#### Scenario
+High-concurrency Spring Boot applications on Java 21+ characterized by blocking I/O (JPA/Hibernate database queries, downstream REST calls via `RestClient`, Redis operations).
 
-    // ❌ TRAP: Do NOT assume @Async inherits the caller's transaction
-    @Transactional
-    public void placeOrder(Order order) {
-        orderRepository.save(order);
-        // This async call runs on a DIFFERENT thread → DIFFERENT transaction
-        // If the async work fails, the caller's transaction may already be committed
-        processOrderAsync(order.getId()); // caller's tx and async tx are independent!
-    }
-}
+#### Use-Case
+Microservices serving 50,000+ concurrent long-lived connections, slow external legacy APIs, or batch operations where platform thread limits bottleneck application throughput.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Near-zero RAM footprint (~1KB vs 1MB per thread); millions of virtual threads can exist concurrently; preserves simple imperative blocking coding styles; eliminates complex reactive callbacks.
+- **Trade-offs**: Pinned carrier thread hazard when executing inside `synchronized` blocks or JNI native code; virtual threads must NEVER be pooled.
+
+#### Well-Documented Code Example
+
+```yaml
+# application.yml
+spring:
+  threads:
+    virtual:
+      enabled: true
 ```
 
-### 4.8 Async Context Propagation (Security, Request Context)
-
 ```java
-// ❌ Problem: SecurityContext is stored in ThreadLocal — not propagated to async threads
-@Service
-public class BrokenAsyncService {
-    @Async
-    public CompletableFuture<String> brokenAsync() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        // auth is NULL here! ThreadLocal was not propagated to this new thread
-        return CompletableFuture.completedFuture(auth.getName()); // NullPointerException!
-    }
-}
+package com.example.async.virtual;
 
-// ✅ Fix 1: Configure SecurityContextHolder to use InheritableThreadLocal mode
-// In your main class or config:
-SecurityContextHolder.setStrategyName(SecurityContextHolder.MODE_INHERITABLETHREADLOCAL);
-// ⚠️ This works for directly spawned threads but NOT for thread pool reuse!
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.core.task.support.TaskExecutorAdapter;
 
-// ✅ Fix 2: Use Spring Security's DelegatingSecurityContextExecutor
+import java.util.concurrent.Executors;
+
+/**
+ * Approach 3: Programmatic Virtual Thread Configuration (Spring Boot 3.2+)
+ */
 @Configuration
-@EnableAsync
-public class SecureAsyncConfig implements AsyncConfigurer {
+public class VirtualThreadArchitectureConfig {
 
-    @Bean
-    public ThreadPoolTaskExecutor baseExecutor() {
-        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-        exec.setCorePoolSize(10);
-        exec.setMaxPoolSize(30);
-        exec.setQueueCapacity(100);
-        exec.initialize();
-        return exec;
-    }
-
-    @Override
-    public Executor getAsyncExecutor() {
-        // Wraps the executor to propagate SecurityContext to async threads
-        return new DelegatingSecurityContextExecutor(baseExecutor(),
-            SecurityContextHolder.getContext());
+    @Bean(name = "applicationTaskExecutor")
+    @ConditionalOnProperty(name = "spring.threads.virtual.enabled", havingValue = "true")
+    public AsyncTaskExecutor virtualThreadAsyncTaskExecutor() {
+        // Spawns an unbound, lightweight Virtual Thread per submitted task
+        return new TaskExecutorAdapter(Executors.newVirtualThreadPerTaskExecutor());
     }
 }
+```
 
-// ✅ Fix 3: Manually capture and set context
-@Service
-public class FixedAsyncService {
-    @Autowired
-    @Qualifier("taskExecutor")
-    private Executor executor;
+---
 
-    public CompletableFuture<String> asyncWithContext() {
-        // Capture context on calling thread
-        SecurityContext context = SecurityContextHolder.getContext();
+### Approach 4: Non-Blocking Reactive Streams (Spring WebFlux & Project Reactor)
+
+#### Scenario
+Event-driven streaming applications, massive WebSocket hubs, Server-Sent Events (SSE), or systems where hardware resources are severely constrained and end-to-end non-blocking drivers (R2DBC, Reactive Mongo) are available.
+
+#### Use-Case
+Real-time financial ticker streaming, IoT sensor ingestion gateways, high-density chat servers.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Ultra-low resource consumption; runs on a fixed number of worker threads equal to CPU cores; built-in reactive backpressure.
+- **Trade-offs**: Complete rewrite of programming model (`Mono`/`Flux`); blocking calls anywhere in the pipeline stall the entire Netty event loop; incompatible with classic JPA/JDBC.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.reactive.controller;
+
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
+
+import java.time.Duration;
+
+@RestController
+@RequestMapping("/api/v1/stream")
+public class ReactiveStreamController {
+
+    @GetMapping(value = "/telemetry", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> streamTelemetry() {
+        return Flux.interval(Duration.ofMillis(200))
+            .map(sequence -> "Data Packet #" + sequence + " at " + System.currentTimeMillis())
+            .publishOn(Schedulers.parallel()); // Non-blocking event loop execution
+    }
+}
+```
+
+---
+
+### Asynchronous Architecture Comparison Matrix
+
+| Feature | `@Async` + `ThreadPoolTaskExecutor` | Programmatic `CompletableFuture` | Java 21 Virtual Threads | Reactive (Spring WebFlux) |
+|---|---|---|---|---|
+| **Programming Paradigm** | Imperative / Annotation | Functional / Chaining | Imperative / Blocking | Reactive Streams (`Mono`/`Flux`) |
+| **Thread Model** | OS Platform Threads | OS Platform Threads | Lightweight JVM Virtual Threads | Fixed Event Loop (Netty) |
+| **Max Concurrency** | Hundreds (OS thread limited) | Hundreds | **Millions** | **Millions** |
+| **Memory Footprint** | ~1MB per thread stack | ~1MB per thread stack | **~1-2KB per virtual thread** | Minimal (Event-driven) |
+| **Database Compatibility** | JPA / Hibernate / JDBC | JPA / Hibernate / JDBC | JPA / Hibernate / JDBC | **R2DBC Only** (No blocking JDBC) |
+| **Risk / Pitfall** | Self-invocation bypass; OOM | Shared commonPool starvation | Pinned carrier thread on `synchronized` | Accidental blocking stalls event loop |
+
+---
+
+## 5. Multi-Approach: ThreadContext Propagation across Asynchronous Boundaries
+
+Because `ThreadLocal` variables are bound strictly to the calling OS thread, submitting a task to a background thread pool strips all context (`SecurityContext`, `MDC` trace IDs, `Locale`). The following four approaches solve this propagation dilemma.
+
+---
+
+### Approach 1: Spring Framework `TaskDecorator` Configuration (Standard)
+
+#### Scenario
+Production Spring Boot applications utilizing `@Async` or standard `ThreadPoolTaskExecutor` beans that must reliably transfer MDC logging trace IDs (`traceId`, `spanId`) and `SecurityContext` to every async execution.
+
+#### Use-Case
+Distributed tracing with Logback/SLF4J, propagating the currently authenticated user's credentials to async worker threads.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Centralized; completely non-invasive; works automatically for every `@Async` method routed through that executor; guarantees context cleanup in a `finally` block to prevent thread contamination.
+- **Trade-offs**: Only applies to tasks submitted through the configured `ThreadPoolTaskExecutor`; does not apply to manual `new Thread()` or unconfigured pools.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.async.decorator;
+
+import org.slf4j.MDC;
+import org.springframework.core.task.TaskDecorator;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.Map;
+
+/**
+ * Captures context from the calling thread and reinstates it onto the worker thread.
+ */
+public class SecurityAndMdcTaskDecorator implements TaskDecorator {
+
+    @Override
+    public Runnable decorate(Runnable runnable) {
+        // 1. Capture context on the CALLING thread (e.g., Tomcat HTTP thread)
+        Map<String, String> mdcContext = MDC.getCopyOfContextMap();
+        SecurityContext securityContext = SecurityContextHolder.getContext();
+
+        return () -> {
+            // 2. Set context on the WORKER thread
+            Map<String, String> originalMdc = MDC.getCopyOfContextMap();
+            if (mdcContext != null) {
+                MDC.setContextMap(mdcContext);
+            }
+            SecurityContextHolder.setContext(securityContext);
+
+            try {
+                // 3. Execute the actual async task
+                runnable.run();
+            } finally {
+                // 4. CRITICAL: Clean up worker thread context to prevent pollution
+                MDC.clear();
+                if (originalMdc != null) {
+                    MDC.setContextMap(originalMdc);
+                }
+                SecurityContextHolder.clearContext();
+            }
+        };
+    }
+}
+```
+
+```java
+// Register decorator inside configuration
+@Bean("decoratedTaskExecutor")
+public ThreadPoolTaskExecutor decoratedTaskExecutor() {
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(10);
+    executor.setMaxPoolSize(20);
+    executor.setQueueCapacity(100);
+    executor.setTaskDecorator(new SecurityAndMdcTaskDecorator());
+    executor.initialize();
+    return executor;
+}
+```
+
+---
+
+### Approach 2: Micrometer Context Propagation (Spring Boot 3.x Unified Standard)
+
+#### Scenario
+Spring Boot 3.x applications integrating Micrometer Tracing, OpenTelemetry, Project Reactor, and Virtual Threads where a unified context abstraction must span reactive, async, and blocking boundaries.
+
+#### Use-Case
+End-to-end tracing across hybrid WebFlux, `CompletableFuture`, and Virtual Thread pipelines.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Native to Spring Boot 3; supports both reactive and imperative threads; unified API.
+- **Trade-offs**: Requires the `io.micrometer:context-propagation` library dependency; slightly steeper initial configuration.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.async.micrometer;
+
+import io.micrometer.context.ContextRegistry;
+import io.micrometer.context.ContextSnapshot;
+import org.slf4j.MDC;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.concurrent.Executor;
+
+@Configuration
+public class MicrometerPropagationConfig {
+
+    static {
+        // Register MDC accessor with Micrometer Context Registry
+        ContextRegistry.getInstance().registerThreadLocalAccessor(
+            "mdc.traceId",
+            () -> MDC.get("traceId"),
+            traceId -> MDC.put("traceId", traceId),
+            () -> MDC.remove("traceId")
+        );
+    }
+
+    public static <T> Runnable wrapWithSnapshot(Runnable task) {
+        // Captures all registered ThreadLocals and returns a decorated Runnable
+        return ContextSnapshot.captureAll().wrap(task);
+    }
+}
+```
+
+---
+
+### Approach 3: Spring Security `DelegatingSecurityContextExecutor`
+
+#### Scenario
+Applications exclusively needing to propagate `SecurityContext` without custom tracing mechanisms.
+
+#### Use-Case
+Passing authentication tokens down into async reporting tasks.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Out-of-the-box class provided directly by `spring-security-core`.
+- **Trade-offs**: Only propagates security; ignores MDC, correlation IDs, or custom tenant contexts.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.async.security;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.security.concurrent.DelegatingSecurityContextExecutor;
+
+import java.util.concurrent.Executor;
+
+@Configuration
+public class DelegatingSecurityConfig {
+
+    @Bean("securityAwareExecutor")
+    public Executor securityAwareExecutor() {
+        ThreadPoolTaskExecutor baseExecutor = new ThreadPoolTaskExecutor();
+        baseExecutor.setCorePoolSize(5);
+        baseExecutor.setMaxPoolSize(10);
+        baseExecutor.initialize();
+
+        // Automatically propagates SecurityContextHolder to all async workers
+        return new DelegatingSecurityContextExecutor(baseExecutor);
+    }
+}
+```
+
+---
+
+### Approach 4: Manual Context Capture, Transfer, and Eviction via Wrapper Closures
+
+#### Scenario
+Ad-hoc asynchronous calls using `CompletableFuture.runAsync(...)` where custom thread pool infrastructure or third-party executors cannot be modified.
+
+#### Use-Case
+Passing a correlation token into a one-off `CompletableFuture` invocation.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Requires zero framework configuration; works in any vanilla Java environment.
+- **Trade-offs**: Highly verbose; developer error can lead to missed cleanup in `finally` block causing memory leaks.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.async.manual;
+
+import org.slf4j.MDC;
+
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
+
+public final class AsyncContextUtils {
+
+    private AsyncContextUtils() {}
+
+    public static <U> CompletableFuture<U> supplyAsyncWithMdc(Supplier<U> supplier, Executor executor) {
+        // 1. Capture on current thread
+        final Map<String, String> callingContext = MDC.getCopyOfContextMap();
 
         return CompletableFuture.supplyAsync(() -> {
-            SecurityContextHolder.setContext(context); // set on async thread
+            // 2. Install on pool thread
+            if (callingContext != null) {
+                MDC.setContextMap(callingContext);
+            }
             try {
-                return SecurityContextHolder.getContext().getAuthentication().getName();
+                return supplier.get();
             } finally {
-                SecurityContextHolder.clearContext(); // cleanup!
+                // 3. Clear pool thread
+                MDC.clear();
             }
         }, executor);
     }
@@ -937,1189 +1078,684 @@ public class FixedAsyncService {
 
 ---
 
-## 5. Thread Pools in Spring Boot
+### Context Propagation Comparison Matrix
 
-### 5.1 ThreadPoolTaskExecutor — Configuration Deep Dive
-
-The thread pool lifecycle follows this exact sequence under load:
-
-```
-Task submitted
-    │
-    ▼
-Core threads busy?
-  ├─ NO  → Assign to idle core thread
-  └─ YES → Is queue full?
-               ├─ NO  → Add to queue (wait for a core thread)
-               └─ YES → Can create new thread (< maxPoolSize)?
-                            ├─ YES → Spawn new (non-core) thread
-                            └─ NO  → RejectedExecutionHandler fires!
-```
-
-> [!IMPORTANT]
-> **The queue fills BEFORE max threads are created.** This surprises most developers. If you set `corePoolSize=10`, `maxPoolSize=50`, `queueCapacity=200`, then the 51st task to arrive while all 10 core threads are busy goes into the queue — it does NOT immediately spawn thread #11. Thread #11 is only created after the queue has 200 items AND a new task arrives.
-
-```java
-@Configuration
-public class ThreadPoolConfig {
-
-    @Bean("ioExecutor")
-    public ThreadPoolTaskExecutor ioExecutor() {
-        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-
-        // For I/O-bound tasks: more threads than CPU cores
-        int cpuCores = Runtime.getRuntime().availableProcessors();
-        exec.setCorePoolSize(cpuCores * 4);    // e.g., 32 for 8-core machine
-        exec.setMaxPoolSize(cpuCores * 8);     // e.g., 64
-        exec.setQueueCapacity(500);
-
-        exec.setKeepAliveSeconds(60);          // non-core threads die after 60s idle
-        exec.setAllowCoreThreadTimeOut(true);  // core threads also time out (good for elasticity)
-
-        exec.setThreadNamePrefix("io-worker-");
-        exec.initialize();
-        return exec;
-    }
-
-    @Bean("cpuExecutor")
-    public ThreadPoolTaskExecutor cpuExecutor() {
-        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-
-        // For CPU-bound tasks: no more threads than cores (avoid context switching)
-        int cpuCores = Runtime.getRuntime().availableProcessors();
-        exec.setCorePoolSize(cpuCores);
-        exec.setMaxPoolSize(cpuCores);
-        exec.setQueueCapacity(1000);           // large queue — tasks wait, don't context-switch
-
-        exec.setThreadNamePrefix("cpu-worker-");
-        exec.initialize();
-        return exec;
-    }
-}
-```
-
-### 5.2 RejectedExecutionHandler Strategies
-
-```java
-// Strategy 1: AbortPolicy (DEFAULT) — throws RejectedExecutionException
-// Strategy 2: CallerRunsPolicy — caller thread runs the task (backpressure!)
-// Strategy 3: DiscardPolicy — silently drops the task
-// Strategy 4: DiscardOldestPolicy — drops the oldest queued task
-
-@Bean
-public ThreadPoolTaskExecutor resilientExecutor() {
-    ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-    exec.setCorePoolSize(10);
-    exec.setMaxPoolSize(20);
-    exec.setQueueCapacity(100);
-
-    // CallerRunsPolicy is best for most Spring Boot apps:
-    // - Provides natural backpressure (slows down the caller)
-    // - No tasks are lost
-    // - Works well with HTTP request handlers (slows inbound request)
-    exec.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-
-    // Custom handler — for monitoring and alerting
-    exec.setRejectedExecutionHandler((task, executor2) -> {
-        log.error("Task rejected! Queue size: {}, Active threads: {}",
-            executor2.getQueue().size(), executor2.getActiveCount());
-        // Metrics counter, alerting, etc.
-        throw new RejectedExecutionException("Thread pool saturated");
-    });
-
-    exec.initialize();
-    return exec;
-}
-```
-
-### 5.3 Graceful Shutdown
-
-```java
-@Configuration
-@EnableAsync
-public class GracefulShutdownConfig implements AsyncConfigurer {
-
-    @Bean(name = "taskExecutor", destroyMethod = "shutdown")
-    public ThreadPoolTaskExecutor taskExecutor() {
-        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-        exec.setCorePoolSize(10);
-        exec.setMaxPoolSize(50);
-        exec.setQueueCapacity(200);
-
-        // ✅ Graceful shutdown configuration
-        exec.setWaitForTasksToCompleteOnShutdown(true);   // Don't kill running tasks
-        exec.setAwaitTerminationSeconds(60);               // Wait up to 60s for completion
-
-        exec.initialize();
-        return exec;
-    }
-}
-```
-
-In `application.yml`:
-```yaml
-spring:
-  lifecycle:
-    timeout-per-shutdown-phase: 60s  # Spring Boot 2.3+ graceful shutdown
-server:
-  shutdown: graceful
-```
-
-### 5.4 Monitoring Thread Pools
-
-```java
-@Component
-public class ThreadPoolMonitor {
-
-    @Autowired
-    @Qualifier("taskExecutor")
-    private ThreadPoolTaskExecutor taskExecutor;
-
-    @Scheduled(fixedDelay = 30_000)
-    public void logThreadPoolStats() {
-        ThreadPoolExecutor pool = taskExecutor.getThreadPoolExecutor();
-        log.info("""
-            Thread Pool Stats:
-              Pool size (current/core/max): {}/{}/{}
-              Active threads: {}
-              Queue size: {}/{}
-              Completed tasks: {}
-              """,
-            pool.getPoolSize(),
-            pool.getCorePoolSize(),
-            pool.getMaximumPoolSize(),
-            pool.getActiveCount(),
-            pool.getQueue().size(),
-            taskExecutor.getQueueCapacity(),
-            pool.getCompletedTaskCount()
-        );
-    }
-}
-```
-
-**Expose via Actuator:**
-
-```java
-@Component
-public class ThreadPoolMetrics implements MeterBinder {
-
-    @Autowired
-    @Qualifier("taskExecutor")
-    private ThreadPoolTaskExecutor executor;
-
-    @Override
-    public void bindTo(MeterRegistry registry) {
-        ThreadPoolExecutor pool = executor.getThreadPoolExecutor();
-
-        Gauge.builder("thread.pool.active", pool, ThreadPoolExecutor::getActiveCount)
-             .tag("pool", "taskExecutor")
-             .register(registry);
-
-        Gauge.builder("thread.pool.queue.size", pool, e -> e.getQueue().size())
-             .tag("pool", "taskExecutor")
-             .register(registry);
-
-        Gauge.builder("thread.pool.size", pool, ThreadPoolExecutor::getPoolSize)
-             .tag("pool", "taskExecutor")
-             .register(registry);
-    }
-}
-```
-
-### 5.5 Virtual Threads in Java 21 / Spring Boot 3.2
-
-Java 21 introduced **Virtual Threads** (Project Loom) — lightweight threads managed by the JVM, not the OS. Spring Boot 3.2+ can use them natively.
-
-```yaml
-# application.yml — enable virtual threads for Tomcat
-spring:
-  threads:
-    virtual:
-      enabled: true
-```
-
-```java
-// Or configure programmatically:
-@Configuration
-public class VirtualThreadConfig {
-
-    // Spring Boot 3.2+ auto-configures this when spring.threads.virtual.enabled=true
-    @Bean
-    public TomcatProtocolHandlerCustomizer<?> virtualThreadCustomizer() {
-        return protocolHandler ->
-            protocolHandler.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-    }
-
-    // Virtual thread executor for @Async
-    @Bean
-    public AsyncTaskExecutor applicationTaskExecutor() {
-        return new TaskExecutorAdapter(Executors.newVirtualThreadPerTaskExecutor());
-    }
-}
-```
-
-| | Platform Threads | Virtual Threads |
-|---|---|---|
-| Managed by | OS | JVM |
-| Stack size | 512KB–1MB | ~1KB (heap-backed) |
-| Count limit | ~thousands | Millions |
-| Blocking behavior | OS thread blocked | JVM parks virtual thread, platform thread free |
-| Context switch cost | High (OS) | Low (JVM scheduler) |
-| Best for | CPU-bound tasks | I/O-bound tasks |
-
-> [!NOTE]
-> Virtual threads shine for **I/O-bound** workloads (database calls, HTTP calls, file I/O). For CPU-bound work, they offer no advantage over platform threads. Do NOT pool virtual threads — create one per task and let the JVM handle it.
+| Feature | Approach 1: `TaskDecorator` | Approach 2: Micrometer | Approach 3: DelegatingSecurity | Approach 4: Manual Wrapper |
+|---|---|---|---|---|
+| **Scope of Context** | Any custom ThreadLocal + MDC + Security | Any registered accessor | SecurityContext only | Ad-hoc per invocation |
+| **Ease of Setup** | Clean, centralized Spring bean | Requires library setup | Built-in Spring Security | Boilerplate per call |
+| **Reactive Support** | No (Imperative only) | **Yes** (Reactor + Imperative) | No | No |
+| **Recommended For** | **Spring Boot 3 WebMVC apps** | **Spring Boot 3 + Observability** | Security-only apps | Ad-hoc vanilla tasks |
 
 ---
 
-## 6. CompletableFuture
+## 6. Multi-Approach: Database-Level Concurrency Control
 
-### 6.1 Core Transformation Methods
-
-```java
-@Service
-public class OrderPipelineService {
-
-    // thenApply — transform result (sync, on same thread)
-    public CompletableFuture<OrderDto> fetchAndTransform(Long orderId) {
-        return orderRepo.findByIdAsync(orderId)      // CompletableFuture<Order>
-            .thenApply(order -> toDto(order));       // Order → OrderDto (sync transform)
-    }
-
-    // thenCompose — flat-map (async → async, avoids CompletableFuture<CompletableFuture<T>>)
-    public CompletableFuture<Invoice> fetchOrderAndGenerateInvoice(Long orderId) {
-        return orderRepo.findByIdAsync(orderId)
-            .thenCompose(order -> invoiceService.generateAsync(order)); // returns CF<Invoice>
-    }
-
-    // thenCombine — combine two independent async results
-    public CompletableFuture<OrderSummary> buildOrderSummary(Long orderId) {
-        CompletableFuture<Order>    orderFuture    = orderRepo.findByIdAsync(orderId);
-        CompletableFuture<Customer> customerFuture = customerRepo.findByOrderAsync(orderId);
-
-        // Both run concurrently! Combine when both complete.
-        return orderFuture.thenCombine(customerFuture,
-            (order, customer) -> new OrderSummary(order, customer));
-    }
-
-    // thenAccept — consume result (returns CompletableFuture<Void>)
-    public CompletableFuture<Void> processAndLog(Long orderId) {
-        return orderRepo.findByIdAsync(orderId)
-            .thenAccept(order -> log.info("Processed: {}", order.getId()));
-    }
-}
-```
-
-### 6.2 allOf and anyOf
-
-```java
-@Service
-public class NotificationDispatcher {
-
-    // allOf — wait for ALL futures to complete
-    public CompletableFuture<Void> sendToAllChannels(Notification notification) {
-        CompletableFuture<Void> email = emailService.sendAsync(notification);
-        CompletableFuture<Void> sms   = smsService.sendAsync(notification);
-        CompletableFuture<Void> push  = pushService.sendAsync(notification);
-
-        return CompletableFuture.allOf(email, sms, push); // completes when all 3 complete
-    }
-
-    // Collecting results from allOf (it returns Void, need workaround):
-    public CompletableFuture<List<String>> fetchAllNames(List<Long> userIds) {
-        List<CompletableFuture<String>> futures = userIds.stream()
-            .map(id -> userService.fetchNameAsync(id))
-            .collect(Collectors.toList());
-
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-            .thenApply(v -> futures.stream()
-                .map(CompletableFuture::join) // safe here — all completed
-                .collect(Collectors.toList()));
-    }
-
-    // anyOf — complete as soon as the FIRST future completes
-    public CompletableFuture<Object> fetchFromFastestSource(String key) {
-        CompletableFuture<Object> primary   = primaryCache.getAsync(key);
-        CompletableFuture<Object> secondary = secondaryCache.getAsync(key);
-        CompletableFuture<Object> database  = databaseService.fetchAsync(key);
-
-        // Returns the result from whichever finishes first
-        return CompletableFuture.anyOf(primary, secondary, database);
-    }
-}
-```
-
-### 6.3 Exception Handling
-
-```java
-@Service
-public class ResilientService {
-
-    // exceptionally — handle failure, provide fallback (like catch block)
-    public CompletableFuture<String> withFallback(String key) {
-        return riskyService.fetchAsync(key)
-            .exceptionally(ex -> {
-                log.warn("Fetch failed for {}: {}", key, ex.getMessage());
-                return "DEFAULT_VALUE"; // fallback value
-            });
-    }
-
-    // handle — always called (success OR failure), can transform both
-    public CompletableFuture<ApiResponse<String>> withWrappedResponse(String key) {
-        return riskyService.fetchAsync(key)
-            .handle((result, ex) -> {
-                if (ex != null) {
-                    return ApiResponse.error(ex.getMessage());
-                }
-                return ApiResponse.success(result);
-            });
-    }
-
-    // whenComplete — side effect only, does NOT transform result
-    public CompletableFuture<String> withAudit(String key) {
-        return riskyService.fetchAsync(key)
-            .whenComplete((result, ex) -> {
-                if (ex != null) {
-                    auditLog.recordFailure(key, ex);
-                } else {
-                    auditLog.recordSuccess(key, result);
-                }
-                // result still propagates (success or failure) to next stage
-            });
-    }
-}
-```
-
-### 6.4 Running with Custom Executor
-
-```java
-@Service
-public class ParallelProductService {
-
-    @Autowired
-    @Qualifier("ioExecutor")
-    private Executor ioExecutor;
-
-    public CompletableFuture<ProductDetails> fetchProductDetails(Long productId) {
-        // All operations run on our custom ioExecutor, not ForkJoinPool.commonPool()
-        CompletableFuture<Product>     product  = CompletableFuture.supplyAsync(
-            () -> productRepo.findById(productId).orElseThrow(), ioExecutor);
-
-        CompletableFuture<List<Review>> reviews = CompletableFuture.supplyAsync(
-            () -> reviewRepo.findByProductId(productId), ioExecutor);
-
-        CompletableFuture<Integer>     stock    = CompletableFuture.supplyAsync(
-            () -> inventoryService.getStock(productId), ioExecutor);
-
-        return CompletableFuture.allOf(product, reviews, stock)
-            .thenApplyAsync(v -> new ProductDetails(
-                product.join(),
-                reviews.join(),
-                stock.join()
-            ), ioExecutor);
-    }
-}
-```
-
-> [!WARNING]
-> Avoid `ForkJoinPool.commonPool()` (used when no executor is specified) in Spring Boot web applications. It's a shared pool with limited size (`Runtime.availableProcessors() - 1` threads). I/O blocking on commonPool can starve other app features using it (e.g., parallel streams).
-
-### 6.5 CompletableFuture in Spring MVC Controllers
-
-```java
-@RestController
-@RequestMapping("/products")
-public class ProductController {
-
-    @Autowired ProductService productService;
-
-    // Spring MVC handles CompletableFuture return types natively
-    // The servlet thread is released while the future completes
-    @GetMapping("/{id}/details")
-    public CompletableFuture<ResponseEntity<ProductDetails>> getDetails(@PathVariable Long id) {
-        return productService.fetchProductDetails(id)
-            .thenApply(details -> ResponseEntity.ok(details))
-            .exceptionally(ex -> ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .<ProductDetails>build());
-    }
-
-    // DeferredResult — for more control over timeout and error handling
-    @GetMapping("/{id}/slow")
-    public DeferredResult<ResponseEntity<Product>> getSlowProduct(@PathVariable Long id) {
-        DeferredResult<ResponseEntity<Product>> result = new DeferredResult<>(5000L); // 5s timeout
-        result.onTimeout(() -> result.setErrorResult(
-            ResponseEntity.status(HttpStatus.REQUEST_TIMEOUT).build()));
-
-        productService.fetchSlowly(id)
-            .thenAccept(p -> result.setResult(ResponseEntity.ok(p)))
-            .exceptionally(ex -> { result.setErrorResult(ex); return null; });
-
-        return result;
-    }
-}
-```
+When multiple independent application nodes or threads update identical relational records, synchronization must occur at the persistence tier.
 
 ---
 
-## 7. Database-Level Concurrency
+### Approach 1: Optimistic Locking with `@Version` & Spring Retry
 
-### 7.1 Optimistic Locking with @Version
+#### Scenario
+Read-heavy database workloads with low-to-moderate write contention where transaction rollbacks and retries are acceptable.
 
-Optimistic locking assumes conflicts are rare. It does NOT hold a database lock — instead, it detects conflicts at commit time using a version column.
+#### Use-Case
+E-commerce product descriptions, profile updates, metadata catalogs.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Never acquires database locks; maximum concurrency and throughput; completely eliminates database deadlocks.
+- **Trade-offs**: Throws `OptimisticLockingFailureException` when collision occurs; requires automatic retry logic; wasted CPU cycles if collision rates are high.
+
+#### Well-Documented Code Example
 
 ```java
+package com.example.concurrency.entity;
+
+import jakarta.persistence.*;
+
 @Entity
 @Table(name = "products")
 public class Product {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     private String name;
-    private int stock;
+    private Integer availableStock;
 
-    @Version                     // JPA manages this column automatically
-    private Long version;        // incremented on every UPDATE
+    @Version // JPA automatically checks and increments this column on UPDATE
+    private Long version;
 
-    // getters/setters
+    public Product() {}
+    // Getters and setters omitted for brevity
 }
-```
-
-**Generated SQL:**
-```sql
--- SELECT: fetches version (e.g., version=5)
-SELECT * FROM products WHERE id = 1;
-
--- UPDATE: checks version matches what we read
-UPDATE products SET stock = 99, version = 6 WHERE id = 1 AND version = 5;
--- If another thread updated between our read and write,
--- version in DB is now 6 (not 5), so 0 rows updated → JPA throws OptimisticLockException
 ```
 
 ```java
-@Service
-public class StockService {
+package com.example.concurrency.service;
 
-    @Transactional
-    public void decrementStock(Long productId, int quantity) {
-        Product product = productRepository.findById(productId).orElseThrow();
-        if (product.getStock() < quantity) {
-            throw new InsufficientStockException("Not enough stock");
-        }
-        product.setStock(product.getStock() - quantity);
-        productRepository.save(product); // may throw OptimisticLockException
-    }
-
-    // With retry for optimistic lock conflicts:
-    @Transactional
-    @Retryable(value = ObjectOptimisticLockingFailureException.class,
-               maxAttempts = 3,
-               backoff = @Backoff(delay = 100, multiplier = 2))
-    public void decrementStockWithRetry(Long productId, int quantity) {
-        decrementStock(productId, quantity);
-    }
-}
-```
-
-### 7.2 Pessimistic Locking
-
-Pessimistic locking holds a database row lock for the duration of the transaction — suitable when conflicts are frequent.
-
-```java
-public interface ProductRepository extends JpaRepository<Product, Long> {
-
-    // SELECT ... FOR UPDATE — exclusive lock
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT p FROM Product p WHERE p.id = :id")
-    Optional<Product> findByIdWithWriteLock(@Param("id") Long id);
-
-    // SELECT ... FOR SHARE — shared lock (others can read, not write)
-    @Lock(LockModeType.PESSIMISTIC_READ)
-    @Query("SELECT p FROM Product p WHERE p.id = :id")
-    Optional<Product> findByIdWithReadLock(@Param("id") Long id);
-}
+import com.example.concurrency.entity.Product;
+import com.example.concurrency.repository.ProductRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class BookingService {
+public class OptimisticInventoryService {
 
-    @Transactional(timeout = 10) // auto-rollback after 10s to prevent lock holding
-    public void bookSeat(Long seatId, Long userId) {
-        // Locks the row — other transactions block on this findById until we commit
-        Seat seat = seatRepository.findByIdWithWriteLock(seatId)
-            .orElseThrow(() -> new SeatNotFoundException(seatId));
+    private final ProductRepository productRepository;
 
-        if (!seat.isAvailable()) {
-            throw new SeatAlreadyBookedException(seatId);
+    public OptimisticInventoryService(ProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    /**
+     * Retries up to 3 times with exponential backoff on version collision.
+     */
+    @Retryable(
+        retryFor = { OptimisticLockingFailureException.class },
+        maxAttempts = 3,
+        backoff = @Backoff(delay = 50, multiplier = 2.0)
+    )
+    @Transactional
+    public void deductStockWithOptimisticRetry(Long productId, int quantity) {
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("Product not found"));
+
+        if (product.getAvailableStock() < quantity) {
+            throw new IllegalStateException("Insufficient inventory");
         }
 
-        seat.setAvailable(false);
-        seat.setBookedBy(userId);
-        seatRepository.save(seat);
-        // Lock released on transaction commit
+        product.setAvailableStock(product.getAvailableStock() - quantity);
+        productRepository.save(product); 
+        // Generates: UPDATE products SET stock = ?, version = 2 WHERE id = ? AND version = 1
     }
-}
-```
-
-| | Optimistic | Pessimistic |
-|---|---|---|
-| Lock held in DB | No | Yes (`SELECT FOR UPDATE`) |
-| Conflict detection | At commit | At read |
-| Throughput | High (no lock wait) | Lower (waiters block) |
-| Suitable when | Conflicts rare | Conflicts frequent |
-| Risk | `OptimisticLockException` at commit | Deadlocks |
-| Retry needed | Often | Rarely (but timeout needed) |
-
-### 7.3 Deadlocks
-
-A **deadlock** occurs when thread A holds lock L1 and waits for L2, while thread B holds L2 and waits for L1 — both block forever.
-
-```
-Thread A: LOCKS seat_1 → waiting for seat_2
-Thread B: LOCKS seat_2 → waiting for seat_1
-                ↑                    ↑
-             DEADLOCK! Neither can proceed
-```
-
-**Prevention strategies:**
-
-```java
-// ✅ Strategy 1: Always acquire locks in consistent order
-@Transactional
-public void swapSeats(Long seatId1, Long seatId2, Long userId) {
-    // Always lock lower ID first — prevents A(1,2) vs B(2,1) deadlock
-    Long firstId  = Math.min(seatId1, seatId2);
-    Long secondId = Math.max(seatId1, seatId2);
-
-    Seat first  = seatRepo.findByIdWithWriteLock(firstId).orElseThrow();
-    Seat second = seatRepo.findByIdWithWriteLock(secondId).orElseThrow();
-    // swap logic
-}
-
-// ✅ Strategy 2: Use transaction timeout
-@Transactional(timeout = 5) // auto-rollback prevents infinite deadlock
-public void updateOrder(Long orderId) { /* ... */ }
-
-// ✅ Strategy 3: Keep transactions short — release locks ASAP
-@Transactional
-public void shortTransaction(Long id) {
-    Entity e = repo.findByIdWithWriteLock(id).orElseThrow();
-    e.setStatus("DONE");
-    repo.save(e);
-    // commit IMMEDIATELY — don't do HTTP calls, heavy computation inside @Transactional!
 }
 ```
 
 ---
 
-## 8. Distributed Concurrency
+### Approach 2: Pessimistic Write Locking (`PESSIMISTIC_WRITE` / `SELECT ... FOR UPDATE`)
 
-### 8.1 Why `synchronized` Fails in Distributed Systems
+#### Scenario
+High-contention financial or reservation domains where conflicts are frequent and optimistic retries would cause severe thrashing.
 
+#### Use-Case
+Concert seat reservations, flash sales, high-value bank ledger balance transfers.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Guaranteed serial execution at the database row level; zero collision retries required; eliminates double spending.
+- **Trade-offs**: Other transactions block until the holding transaction commits; potential for database deadlocks if multiple tables are locked out-of-order; reduces database throughput.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.concurrency.repository;
+
+import com.example.concurrency.entity.Product;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.Optional;
+
+public interface ProductLockRepository extends JpaRepository<Product, Long> {
+
+    // Emits SQL: SELECT ... FROM products WHERE id = ? FOR UPDATE
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Product p WHERE p.id = :id")
+    Optional<Product> findByIdWithPessimisticWriteLock(@Param("id") Long id);
+}
 ```
-Pod 1 (JVM 1)                    Pod 2 (JVM 2)
-──────────────                   ──────────────
-synchronized(this) { ← THIS       synchronized(this) { ← DIFFERENT OBJECT!
-  check inventory                   check inventory
-  decrement                         decrement ← BOTH can enter! synchronized is per-JVM
-}                                }
+
+```java
+package com.example.concurrency.service;
+
+import com.example.concurrency.entity.Product;
+import com.example.concurrency.repository.ProductLockRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class PessimisticInventoryService {
+
+    private final ProductLockRepository productRepository;
+
+    public PessimisticInventoryService(ProductLockRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    @Transactional(timeout = 5) // Critical: enforce timeout to prevent indefinite lock blocking
+    public void deductStockPessimistic(Long productId, int quantity) {
+        // Row is locked immediately upon SELECT; subsequent threads block until this transaction commits
+        Product product = productRepository.findByIdWithPessimisticWriteLock(productId)
+            .orElseThrow(() -> new IllegalArgumentException("Product not found"));
+
+        if (product.getAvailableStock() < quantity) {
+            throw new IllegalStateException("Insufficient stock");
+        }
+
+        product.setAvailableStock(product.getAvailableStock() - quantity);
+        productRepository.save(product);
+    }
+}
 ```
 
-`synchronized` only works within a single JVM. In a cluster of microservices, you need a **distributed lock**.
+---
 
-### 8.2 Distributed Locks with Redis (Redisson)
+### Approach 3: Pessimistic Read Locking (`PESSIMISTIC_READ` / `SELECT ... FOR SHARE`)
+
+#### Scenario
+Workloads where a record must be read and guaranteed not to be modified or deleted by concurrent writers while generating a consistent report or dependent calculation, but concurrent readers are permitted.
+
+#### Use-Case
+End-of-day reconciliation summaries, auditing compliance snapshots.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Multiple readers acquire shared locks concurrently without blocking each other; completely blocks concurrent writers (`FOR UPDATE`).
+- **Trade-offs**: If two concurrent readers both decide to upgrade their read lock to a write lock, an immediate deadlock occurs.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.concurrency.repository;
+
+import com.example.concurrency.entity.Product;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.Optional;
+
+public interface ProductReadLockRepository extends JpaRepository<Product, Long> {
+
+    // Emits SQL: SELECT ... FROM products WHERE id = ? FOR SHARE
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT p FROM Product p WHERE p.id = :id")
+    Optional<Product> findByIdWithPessimisticReadLock(@Param("id") Long id);
+}
+```
+
+---
+
+### Approach 4: Single-Statement Atomic Database Mutations (`UPDATE ... WHERE condition`)
+
+#### Scenario
+Simple numerical increments or decrements where fetching the entity into Java memory is unnecessary.
+
+#### Use-Case
+Inventory quantity reduction, user wallet balance debits, coupon usage counts.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: **Highest possible performance**; relies on underlying database engine row locks for the duration of a single SQL statement; eliminates ORM dirty-checking overhead; zero application-level locks or retries.
+- **Trade-offs**: Bypasses Hibernate in-memory dirty checking and first-level cache; does not trigger `@EntityListeners`.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.concurrency.repository;
+
+import com.example.concurrency.entity.Product;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+public interface AtomicProductRepository extends JpaRepository<Product, Long> {
+
+    /**
+     * Executes atomic decrement directly in the database engine.
+     * Returns the count of affected rows: 1 = success, 0 = insufficient stock.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+        UPDATE Product p 
+        SET p.availableStock = p.availableStock - :quantity 
+        WHERE p.id = :id AND p.availableStock >= :quantity
+    """)
+    int deductStockAtomically(@Param("id") Long id, @Param("quantity") int quantity);
+}
+```
+
+```java
+package com.example.concurrency.service;
+
+import com.example.concurrency.repository.AtomicProductRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class HighPerformanceAtomicInventoryService {
+
+    private final AtomicProductRepository productRepository;
+
+    public HighPerformanceAtomicInventoryService(AtomicProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    @Transactional
+    public void deductStock(Long productId, int quantity) {
+        int updatedRows = productRepository.deductStockAtomically(productId, quantity);
+        if (updatedRows == 0) {
+            throw new IllegalStateException("Insufficient stock or product does not exist");
+        }
+    }
+}
+```
+
+---
+
+### Database Concurrency Comparison Matrix
+
+| Strategy | Lock Mechanism | Collision Handling | Database Lock Duration | Throughput | Best For |
+|---|---|---|---|---|---|
+| **Approach 1: Optimistic** | `@Version` column check | Exception + Retry | None | **Highest** | Low contention, Read-heavy |
+| **Approach 2: Pessimistic Write** | `FOR UPDATE` row lock | Serialized wait | Full transaction duration | Moderate | High contention, Financial |
+| **Approach 3: Pessimistic Read** | `FOR SHARE` row lock | Serialized wait | Full transaction duration | Moderate | Consistent Read Snapshots |
+| **Approach 4: Atomic SQL** | Engine row lock | Return updated row count | Single SQL statement | **Maximum** | Simple counter/stock deductions |
+
+---
+
+## 7. Multi-Approach: Distributed Locking & Multi-Node Synchronization
+
+In a clustered microservice deployment running across multiple Kubernetes pods, in-memory Java synchronization (`synchronized`, `ReentrantLock`) fails because each pod runs an isolated JVM. Distributed synchronization guarantees cross-cluster mutual exclusion.
+
+---
+
+### Approach 1: Redis Distributed Lock with Redisson (Watchdog Auto-Renewal)
+
+#### Scenario
+High-throughput distributed microservices requiring fast lock acquisition and automatic renewal if a node experiences prolonged garbage collection pauses.
+
+#### Use-Case
+Distributed inventory checkout, scheduled background tasks, cross-service payment capture.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Ultra-fast (~1ms); built-in Redisson Watchdog automatically extends lock TTL while business logic executes; fails safe via automatic lease expiration if pod crashes.
+- **Trade-offs**: Introduces operational dependency on Redis cluster; split-brain risk in Redis Sentinel/Cluster during network partitions.
+
+#### Well-Documented Code Example
 
 ```xml
 <!-- pom.xml -->
 <dependency>
     <groupId>org.redisson</groupId>
     <artifactId>redisson-spring-boot-starter</artifactId>
-    <version>3.25.0</version>
+    <version>3.27.0</version>
 </dependency>
 ```
 
 ```java
+package com.example.distributed.lock;
+
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.util.concurrent.TimeUnit;
+
 @Service
-public class DistributedInventoryService {
+public class RedissonDistributedLockService {
 
-    @Autowired
-    private RedissonClient redissonClient;
+    private static final Logger log = LoggerFactory.getLogger(RedissonDistributedLockService.class);
+    private final RedissonClient redissonClient;
 
-    @Autowired
-    private InventoryRepository inventoryRepository;
+    public RedissonDistributedLockService(RedissonClient redissonClient) {
+        this.redissonClient = redissonClient;
+    }
 
-    public boolean reserveItem(String itemSku, int quantity) {
-        // Lock key is specific to the item — no cross-item contention
-        String lockKey = "inventory:lock:" + itemSku;
-        RLock lock = redissonClient.getLock(lockKey);
+    public boolean executeWithLock(String lockKey, long waitTimeSeconds, Runnable criticalTask) {
+        RLock lock = redissonClient.getLock("lock:" + lockKey);
 
         try {
-            // Try to acquire lock: wait up to 5s, auto-expire in 10s
-            // Auto-expire prevents lock starvation if holder crashes
-            boolean acquired = lock.tryLock(5, 10, TimeUnit.SECONDS);
+            // Attempt to acquire: wait up to waitTimeSeconds.
+            // If acquired without explicit leaseTime, Redisson Watchdog auto-renews lock every 10s!
+            boolean acquired = lock.tryLock(waitTimeSeconds, TimeUnit.SECONDS);
             if (!acquired) {
-                throw new LockAcquisitionException("Could not acquire lock for: " + itemSku);
-            }
-
-            // Now we're safe — only one JVM across the cluster holds this lock
-            Inventory inventory = inventoryRepository.findBySku(itemSku);
-            if (inventory.getAvailable() < quantity) {
+                log.warn("Failed to acquire distributed lock for key: [{}]", lockKey);
                 return false;
             }
-            inventory.setAvailable(inventory.getAvailable() - quantity);
-            inventoryRepository.save(inventory);
-            return true;
 
+            try {
+                criticalTask.run();
+                return true;
+            } finally {
+                // MANDATORY: Only unlock if currently held by THIS specific thread
+                if (lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                }
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Lock interrupted", e);
-        } finally {
-            // Only unlock if WE hold the lock (prevents unlocking another thread's lock)
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+            throw new IllegalStateException("Interrupted during lock acquisition", e);
         }
     }
 }
 ```
 
-**Redisson also provides fair locks, read-write locks, and semaphores:**
+---
+
+### Approach 2: Database Advisory Locks & ShedLock Coordination
+
+#### Scenario
+Applications already connected to a relational database (PostgreSQL/MySQL) that want distributed synchronization without introducing Redis infrastructure.
+
+#### Use-Case
+Ensuring `@Scheduled` jobs execute on exactly one node in a multi-pod cluster.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Zero new infrastructure needed; utilizes existing ACID database; ShedLock integrates seamlessly with Spring Boot scheduling.
+- **Trade-offs**: Adds lock contention to primary database; lower lock acquisition throughput than Redis.
+
+#### Well-Documented Code Example
+
+```xml
+<!-- pom.xml -->
+<dependency>
+    <groupId>net.javacrumbs.shedlock</groupId>
+    <artifactId>shedlock-spring</artifactId>
+    <version>5.12.0</version>
+</dependency>
+<dependency>
+    <groupId>net.javacrumbs.shedlock</groupId>
+    <artifactId>shedlock-provider-jdbc-template</artifactId>
+    <version>5.12.0</version>
+</dependency>
+```
 
 ```java
-@Service
-public class RateLimiterService {
+package com.example.distributed.shedlock;
 
-    @Autowired
-    private RedissonClient redissonClient;
+import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
+import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
 
-    // Distributed semaphore — limit concurrent access across cluster
-    public void callExternalApi(String apiKey) throws InterruptedException {
-        RSemaphore semaphore = redissonClient.getSemaphore("api:permits:" + apiKey);
-        semaphore.trySetPermits(10); // max 10 concurrent calls across ALL pods
+import javax.sql.DataSource;
 
-        if (semaphore.tryAcquire(2, TimeUnit.SECONDS)) {
-            try {
-                externalApiClient.call();
-            } finally {
-                semaphore.release();
-            }
-        } else {
-            throw new TooManyRequestsException("Rate limit exceeded");
-        }
+@Configuration
+@EnableSchedulerLock(defaultLockAtMostFor = "10m")
+public class ShedLockConfiguration {
+
+    @Bean
+    public LockProvider lockProvider(DataSource dataSource) {
+        return new JdbcTemplateLockProvider(
+            JdbcTemplateLockProvider.Configuration.builder()
+                .withJdbcTemplate(new org.springframework.jdbc.core.JdbcTemplate(dataSource))
+                .usingDbTime() // Uses DB clock to avoid clock skew across pods
+                .build()
+        );
     }
 }
 ```
 
-### 8.3 Database-Based Distributed Locks
-
 ```java
-@Service
-public class DbDistributedLockService {
+@Component
+public class DistributedScheduledJobs {
 
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
-
-    // Uses a dedicated lock table
-    // CREATE TABLE distributed_locks (
-    //   lock_name VARCHAR(100) PRIMARY KEY,
-    //   acquired_by VARCHAR(100),
-    //   acquired_at TIMESTAMP,
-    //   expires_at TIMESTAMP
-    // );
-
-    @Transactional
-    public boolean tryAcquireLock(String lockName, String instanceId, Duration ttl) {
-        try {
-            int rows = jdbcTemplate.update("""
-                INSERT INTO distributed_locks (lock_name, acquired_by, acquired_at, expires_at)
-                VALUES (?, ?, NOW(), ?)
-                ON CONFLICT (lock_name) DO UPDATE
-                  SET acquired_by = EXCLUDED.acquired_by,
-                      acquired_at = EXCLUDED.acquired_at,
-                      expires_at  = EXCLUDED.expires_at
-                  WHERE distributed_locks.expires_at < NOW()
-                """,
-                lockName, instanceId, Timestamp.from(Instant.now().plus(ttl)));
-            return rows > 0;
-        } catch (DuplicateKeyException e) {
-            return false; // another instance holds the lock
-        }
-    }
-
-    @Transactional
-    public void releaseLock(String lockName, String instanceId) {
-        jdbcTemplate.update(
-            "DELETE FROM distributed_locks WHERE lock_name = ? AND acquired_by = ?",
-            lockName, instanceId);
+    @Scheduled(cron = "0 0 * * * *") // Runs every hour
+    @SchedulerLock(
+        name = "HourlyBillingSyncJob", 
+        lockAtLeastFor = "30s", // Prevents execution on another node if job finishes in 2s
+        lockAtMostFor = "15m"   // Safety net if pod dies while executing
+    )
+    public void executeHourlyBilling() {
+        // Runs on exactly ONE pod across the entire Kubernetes cluster
     }
 }
+```
+
+---
+
+### Approach 3: Distributed Idempotency Token Pattern with Redis & Unique DB Keys
+
+#### Scenario
+Payment webhooks, order submissions, and messaging queues where the goal is not to serialize operations, but to ensure that duplicate requests are detected and processed exactly once.
+
+#### Use-Case
+Stripe/PayPal webhook processing, checkout form double-click deduplication.
+
+#### Benefits Over Others / Trade-offs
+- **Benefits**: Completely prevents duplicate side effects; highly performant; decouples state verification from locking.
+- **Trade-offs**: Requires client to supply a unique idempotency key (UUID); requires caching previous responses.
+
+#### Well-Documented Code Example
+
+```java
+package com.example.distributed.idempotency;
+
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
+
+import java.time.Duration;
+
+@Service
+public class IdempotencyTokenService {
+
+    private final StringRedisTemplate redisTemplate;
+
+    public IdempotencyTokenService(StringRedisTemplate redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
+
+    /**
+     * Atomically sets key only if absent (SET NX) with TTL.
+     * Returns true if this request is unique and should proceed.
+     */
+    public boolean acquireIdempotencyToken(String idempotencyKey, Duration ttl) {
+        String key = "idempotency:" + idempotencyKey;
+        Boolean success = redisTemplate.opsForValue().setIfAbsent(key, "IN_PROGRESS", ttl);
+        return Boolean.TRUE.equals(success);
+    }
+
+    public void markCompleted(String idempotencyKey, String resultPayload, Duration ttl) {
+        String key = "idempotency:" + idempotencyKey;
+        redisTemplate.opsForValue().set(key, resultPayload, ttl);
+    }
+}
+```
+
+---
+
+### Distributed Locking Comparison Matrix
+
+| Approach | Underlying Store | Failure Recovery | Throughput | Operational Burden | Primary Use Case |
+|---|---|---|---|---|---|
+| **Approach 1: Redisson** | Redis | Watchdog / TTL Expiry | **Very High** | Moderate (Redis cluster) | Flash Sales, High-Throughput APIs |
+| **Approach 2: ShedLock** | PostgreSQL / MySQL | TTL Expiry (`lockAtMostFor`) | Moderate | **Lowest** (Existing DB) | Clustered Scheduled Background Jobs |
+| **Approach 3: Idempotency Key** | Redis / Unique Index | Key Expiry / DB Constraint | **High** | Low | Webhooks, Checkout API Deduplication |
+
+---
+
+## 8. Production Thread Pool Sizing & Schedulers
+
+### 8.1 Little's Law, CPU-Bound vs. I/O-Bound Pool Sizing
+
+Selecting thread pool dimensions without mathematical justification is a leading cause of production crashes.
+
+$$\text{Threads}_{\text{CPU-bound}} = N_{\text{cores}} + 1$$
+
+$$\text{Threads}_{\text{I/O-bound}} = N_{\text{cores}} \times \left(1 + \frac{\text{Wait Time}}{\text{Service Time}}\right)$$
+
+Where:
+- $N_{\text{cores}}$ is available logical CPU processors (`Runtime.getRuntime().availableProcessors()`).
+- $\text{Wait Time}$ is latency spent waiting for external responses (database, microservice REST calls, disk).
+- $\text{Service Time}$ is active CPU processing time (JSON parsing, business validations).
+
+If a REST call takes $100\text{ms}$ total, of which $95\text{ms}$ is waiting for PostgreSQL and $5\text{ms}$ is CPU parsing, $\frac{W}{S} = \frac{95}{5} = 19$. On an 8-core CPU server:
+
+$$\text{Threads} = 8 \times (1 + 19) = 160\text{ threads}$$
+
+### 8.2 Saturation Policies (CallerRunsPolicy vs AbortPolicy)
+
+When both the thread pool (`maxPoolSize`) and the task queue (`queueCapacity`) are 100% saturated:
+
+```
+ThreadPool Saturated?
+       │
+       ├─ AbortPolicy (Default) ──> Throws RejectedExecutionException (Drops task immediately)
+       ├─ CallerRunsPolicy ───────> Calling thread executes the task inline (Natural Backpressure!)
+       ├─ DiscardPolicy ──────────> Silently drops task with no notification
+       └─ DiscardOldestPolicy ────> Drops the oldest pending task in queue to make space
 ```
 
 > [!TIP]
-> Redis-based locks (Redisson) are preferred over DB locks for performance. Use DB locks when Redis is not available or for simplicity in low-throughput scenarios. Always set a **TTL** on distributed locks to prevent starvation if the lock holder crashes.
+> In Spring Boot web applications, **`CallerRunsPolicy` is the production standard**. It forces the incoming Tomcat HTTP servlet thread to execute the rejected async task itself. This naturally throttles incoming traffic, preventing out-of-memory errors.
+
+### 8.3 Graceful Shutdown Protocol
+
+During a Kubernetes rolling deployment, pods receive a `SIGTERM` signal. Without graceful shutdown configuration, in-flight asynchronous tasks are terminated abruptly:
+
+```yaml
+# application.yml
+server:
+  shutdown: graceful
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+```
+
+### 8.4 Micrometer Thread Pool Monitoring & Alerts
+
+```java
+package com.example.async.metrics;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+@Configuration
+public class ThreadPoolMetricsBinderConfig {
+
+    public ThreadPoolMetricsBinderConfig(ThreadPoolTaskExecutor productionTaskExecutor, MeterRegistry registry) {
+        // Automatically registers:
+        // executor.active, executor.completed, executor.queued, executor.pool.size
+        new ExecutorServiceMetrics(productionTaskExecutor.getThreadPoolExecutor(), "productionTaskExecutor", java.util.List.of())
+            .bindTo(registry);
+    }
+}
+```
 
 ---
 
-## 9. Common Concurrency Bugs in Spring
+## 9. Common Spring Concurrency Traps & Anti-Patterns
 
-### 9.1 Shared Mutable State in Singleton Beans
+### Trap 1: The `@Async` Self-Invocation Proxy Bypass
+Calling an `@Async` method from another method within the same bean bypasses the Spring AOP dynamic proxy. The method executes synchronously on the calling thread.
 
-```java
-// ❌ BROKEN — mutable state in singleton
-@Service
-public class BrokenReportBuilder {
-    private StringBuilder buffer = new StringBuilder(); // SHARED!
+### Trap 2: The `SimpleAsyncTaskExecutor` Production Disaster
+Failing to specify a custom `TaskExecutor` causes Spring to fall back to `SimpleAsyncTaskExecutor`. This creates a brand new OS platform thread for every task, leading to `java.lang.OutOfMemoryError: unable to create new native thread`.
 
-    public String buildReport(List<String> lines) {
-        buffer.setLength(0); // Thread A clears; Thread B's content gone!
-        lines.forEach(line -> buffer.append(line).append("\n")); // concurrent append → garbage
-        return buffer.toString();
-    }
-}
+### Trap 3: Unbounded In-Memory Queues
+Configuring an `Executor` with `Integer.MAX_VALUE` queue capacity causes the thread pool never to scale past `corePoolSize`. Under burst traffic, millions of tasks accumulate in heap memory, triggering an `OutOfMemoryError`.
 
-// ✅ FIXED — local state
-@Service
-public class SafeReportBuilder {
-    public String buildReport(List<String> lines) {
-        StringBuilder buffer = new StringBuilder(); // per-thread, on stack
-        lines.forEach(line -> buffer.append(line).append("\n"));
-        return buffer.toString();
-    }
-}
+### Trap 4: ThreadLocal Leaks in Recycled Tomcat Threads
+Setting values in `ThreadLocal` or `MDC` without executing `.remove()` inside a mandatory `finally` block leaks security contexts and user identifiers across requests.
+
+### Trap 5: Carrier Thread Pinning on Virtual Threads (Java 21)
+Executing blocking operations inside a `synchronized` block on a Virtual Thread "pins" the virtual thread to its underlying OS carrier thread, disabling Project Loom's scalability benefits. Use `ReentrantLock` instead.
+
+---
+
+## 10. Deep Dive: JMM, Volatile, & Happens-Before Order
+
+The **Java Memory Model (JMM)** defines the formal specification governing when mutations executed by one thread become visible to another thread.
+
+### The Problem: CPU Caching & Instruction Reordering
+
+Modern CPUs do not write directly to main memory (DRAM). Writes hit L1/L2/L3 hardware caches:
+
+```
+[Core 1] ──> [L1 Cache] ──┐
+                          ├──> [L3 Cache] ──> [Main Memory (DRAM)]
+[Core 2] ──> [L1 Cache] ──┘
 ```
 
-### 9.2 Instance Variables in @Controller
+Compilers and CPU out-of-order execution units frequently reorder bytecode instructions as long as single-threaded program output remains unchanged. In multithreaded systems, this causes visibility hazards.
+
+### The Happens-Before Formal Guarantees
+
+An action $A$ **happens-before** action $B$ ($A \prec B$) guarantees that all memory writes performed by $A$ are completely visible to $B$:
+
+1. **Monitor Lock Rule**: An unlock on an intrinsic monitor or explicit `Lock` happens-before every subsequent lock on the same monitor.
+2. **Volatile Variable Rule**: A write to a `volatile` variable happens-before every subsequent read of that exact variable.
+3. **Thread Start Rule**: A call to `Thread.start()` happens-before any action in the started thread.
+4. **Thread Termination Rule**: Any action in a thread happens-before any other thread successfully detects that it has terminated (`thread.join()`).
+5. **Transitivity**: If $A \prec B$ and $B \prec C$, then $A \prec C$.
 
 ```java
-// ❌ CLASSIC BUG — @Controller is singleton!
-@RestController
-@RequestMapping("/api")
-public class BrokenController {
-    private String currentUser;          // SHARED — all requests overwrite each other!
-    private List<String> requestLog = new ArrayList<>(); // NOT thread-safe, SHARED!
+// Safe Double-Checked Locking via Volatile Happens-Before Guarantee
+public class SafeDoubleCheckedSingleton {
+    // Volatile is mandatory: prevents CPU instruction reordering of (memory alloc -> constructor -> field assign)
+    private static volatile SafeDoubleCheckedSingleton instance;
 
-    @GetMapping("/process")
-    public String process(Authentication auth) {
-        currentUser = auth.getName();    // Thread A sets "alice"; Thread B sets "bob"
-        requestLog.add(currentUser);     // concurrent modification!
-        return "Hello " + currentUser;  // Thread A may return "Hello bob" due to race!
-    }
-}
+    private SafeDoubleCheckedSingleton() {}
 
-// ✅ FIXED — use local variables and thread-safe collections
-@RestController
-@RequestMapping("/api")
-public class SafeController {
-    private final List<String> requestLog = new CopyOnWriteArrayList<>();
-
-    @GetMapping("/process")
-    public String process(Authentication auth) {
-        String currentUser = auth.getName(); // local variable — thread-safe!
-        requestLog.add(currentUser);
-        return "Hello " + currentUser;
-    }
-}
-```
-
-### 9.3 SimpleDateFormat Is Not Thread-Safe
-
-```java
-// ❌ BROKEN — SimpleDateFormat is not thread-safe (internal Calendar state is mutable)
-@Service
-public class BrokenDateService {
-    private static final SimpleDateFormat SDF = new SimpleDateFormat("yyyy-MM-dd");
-
-    public String format(Date date) {
-        return SDF.format(date); // concurrent calls corrupt internal Calendar state!
-        // Results in NumberFormatException, wrong dates, or ParseException
-    }
-}
-
-// ✅ Fix 1: Use ThreadLocal<SimpleDateFormat>
-@Service
-public class ThreadLocalDateService {
-    private static final ThreadLocal<SimpleDateFormat> SDF =
-        ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd"));
-
-    public String format(Date date) {
-        return SDF.get().format(date); // each thread has its own instance
-    }
-}
-
-// ✅ Fix 2 (Best): Use java.time.DateTimeFormatter — immutable and thread-safe
-@Service
-public class ModernDateService {
-    private static final DateTimeFormatter FORMATTER =
-        DateTimeFormatter.ofPattern("yyyy-MM-dd"); // immutable, safe to share
-
-    public String format(LocalDate date) {
-        return date.format(FORMATTER);
-    }
-}
-```
-
-### 9.4 HttpServletRequest Sharing
-
-```java
-// ❌ BROKEN — storing HttpServletRequest in an instance field
-@Service
-public class BrokenRequestService {
-    private HttpServletRequest currentRequest; // ← NEVER DO THIS!
-
-    public void setRequest(HttpServletRequest req) {
-        this.currentRequest = req; // Thread A's request overwritten by Thread B
-    }
-
-    public String getClientIp() {
-        return currentRequest.getRemoteAddr(); // may return wrong IP or NPE
-    }
-}
-
-// ✅ FIXED — inject RequestContextHolder or pass request as method parameter
-@Service
-public class SafeRequestService {
-
-    public String getClientIp() {
-        HttpServletRequest request = ((ServletRequestAttributes)
-            RequestContextHolder.getRequestAttributes()).getRequest();
-        return request.getRemoteAddr(); // gets THIS thread's request
-    }
-}
-```
-
-### 9.5 Lazy Initialization Race Condition — Double-Checked Locking
-
-```java
-// ❌ BROKEN — without volatile, other threads may see partially constructed object
-public class BrokenSingleton {
-    private static BrokenSingleton instance;
-
-    public static BrokenSingleton getInstance() {
-        if (instance == null) {              // Check 1: Thread A and B both see null
-            synchronized (BrokenSingleton.class) {
-                if (instance == null) {      // Check 2
-                    instance = new BrokenSingleton();
-                    // JVM may reorder: allocate memory → assign to instance → call constructor
-                    // Thread B may see non-null but uninitialized instance!
+    public static SafeDoubleCheckedSingleton getInstance() {
+        if (instance == null) { // Check 1 (Unsynchronized)
+            synchronized (SafeDoubleCheckedSingleton.class) {
+                if (instance == null) { // Check 2 (Synchronized)
+                    instance = new SafeDoubleCheckedSingleton();
                 }
             }
         }
         return instance;
     }
 }
-
-// ✅ FIXED — volatile prevents reordering
-public class SafeSingleton {
-    private static volatile SafeSingleton instance; // volatile ensures happens-before
-
-    public static SafeSingleton getInstance() {
-        if (instance == null) {
-            synchronized (SafeSingleton.class) {
-                if (instance == null) {
-                    instance = new SafeSingleton();
-                }
-            }
-        }
-        return instance;
-    }
-}
-
-// ✅ Even Better — Initialization-on-demand holder (no synchronization needed)
-public class BestSingleton {
-    private BestSingleton() {}
-
-    private static class Holder {
-        private static final BestSingleton INSTANCE = new BestSingleton();
-        // JVM guarantees class initialization is thread-safe
-    }
-
-    public static BestSingleton getInstance() {
-        return Holder.INSTANCE;
-    }
-}
 ```
 
 ---
 
-## 10. WebFlux & Reactive — Brief Overview
+## 11. Summary & Key Takeaways
 
-### 10.1 Reactive vs Imperative Concurrency Model
-
-| | Spring MVC (Imperative) | Spring WebFlux (Reactive) |
-|---|---|---|
-| Thread model | One thread per request | Small fixed event loop (Netty) |
-| Blocking allowed | Yes | ⚠️ NO — blocks event loop |
-| Scalability | Limited by thread count | Handles millions of connections |
-| Programming model | Synchronous, simple | Reactive streams, complex |
-| Database support | JPA, JDBC | R2DBC (reactive), MongoDB reactive |
-| Best for | Standard CRUD apps | High-concurrency, streaming, I/O-heavy |
-
-### 10.2 When to Use WebFlux
-
-```java
-// Spring WebFlux controller — non-blocking
-@RestController
-@RequestMapping("/reactive")
-public class ReactiveProductController {
-
-    @Autowired ReactiveProductService productService;
-
-    // Mono<T> — 0 or 1 result (reactive equivalent of CompletableFuture)
-    @GetMapping("/{id}")
-    public Mono<Product> getProduct(@PathVariable Long id) {
-        return productService.findById(id); // non-blocking all the way down
-    }
-
-    // Flux<T> — 0 or N results (reactive stream)
-    @GetMapping("/stream")
-    @GetMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<Product> streamProducts() {
-        return productService.findAll()
-            .delayElements(Duration.ofMillis(100)); // push events every 100ms
-    }
-}
+```
+                      SPRING BOOT CONCURRENCY LANDSCAPE
+                                      │
+         ┌────────────────────────────┼────────────────────────────┐
+         ▼                            ▼                            ▼
+[In-Process JVM Layer]      [Asynchronous Layer]        [Distributed Layer]
+- Default: Stateless        - Use ThreadPoolTaskExecutor- Clustered Locks: Redisson
+- Scalable: LongAdder/CAS   - Reject: CallerRunsPolicy  - ShedLock: Scheduled Jobs
+- In-Memory: ConcurrentMap  - Java 21: Virtual Threads  - Idempotency: Redis SET NX
+- Monitors: Private lock    - Decorate: TaskDecorator   - DB: Optimistic / Pessimistic
 ```
 
-### 10.3 Blocking in Reactive Context — The Big Trap
-
-```java
-// ❌ CRITICAL BUG — blocking call on Netty event loop thread
-@Service
-public class BrokenReactiveService {
-
-    public Mono<String> fetchData(Long id) {
-        return Mono.fromSupplier(() -> {
-            // This BLOCKS the event loop thread!
-            return jdbcTemplate.queryForObject("SELECT data FROM t WHERE id=?",
-                String.class, id); // JDBC is blocking!
-            // Netty event loop is now blocked → ALL requests to this pod stall!
-        });
-    }
-}
-
-// ✅ FIXED — use subscribeOn to offload blocking work to a bounded elastic scheduler
-@Service
-public class FixedReactiveService {
-
-    public Mono<String> fetchData(Long id) {
-        return Mono.fromSupplier(() ->
-            jdbcTemplate.queryForObject("SELECT data FROM t WHERE id=?", String.class, id))
-            .subscribeOn(Schedulers.boundedElastic()); // runs on dedicated blocking thread pool
-    }
-}
-
-// ✅ BEST — use R2DBC (truly non-blocking database driver)
-@Repository
-public interface ReactiveProductRepository extends ReactiveCrudRepository<Product, Long> {
-    Flux<Product> findByCategoryId(Long categoryId);
-}
-```
-
-> [!CAUTION]
-> **Never call blocking code (JDBC, RestTemplate, Thread.sleep, synchronized) from within a reactive pipeline without `subscribeOn(Schedulers.boundedElastic())`**. Doing so blocks the tiny event-loop thread pool and causes the entire application to stall.
+1. **Stateless Default**: Keep Spring singleton beans strictly stateless. Store transient state in method-local stack frames.
+2. **Never Pool Virtual Threads**: Platform threads require pooling (`ThreadPoolTaskExecutor`). Virtual threads are cheap and short-lived; spawn one per task.
+3. **Always Decorate Async Executors**: Use `TaskDecorator` to propagate logging MDC trace IDs and `SecurityContext` across thread pool boundaries.
+4. **Choose the Right DB Lock**: Default to Optimistic Locking (`@Version`). Switch to Pessimistic Write (`FOR UPDATE`) or Atomic SQL (`UPDATE WHERE`) for high-contention inventory and ledger mutations.
+5. **Cluster Synchronization**: In multi-pod deployments, JVM-level `synchronized` keywords are ineffective. Use Redisson for distributed locks and ShedLock for scheduled tasks.
 
 ---
 
-## ⚠️ Interview Traps & Gotchas
+## 12. Practice Questions & Interview Scenarios
 
-### Trap 1: "Is Spring Singleton Thread-Safe?"
+1. **The Phantom Lock**: A developer wraps a method inside a `@Service` bean with `public synchronized void process()`. The bean is annotated with `@Transactional`. Why does a race condition still occur under concurrent load?
+   - *Answer*: `@Transactional` creates an AOP proxy. The caller locks on the proxy object, while the transaction commits *after* the synchronized method exits. Another thread enters between method exit and transaction commit.
 
-**Trick answer:** It depends on whether the bean has **mutable state**.
+2. **The Async OOM Trap**: Under load testing, an application throws `OutOfMemoryError: unable to create new native thread`. What configuration in `@EnableAsync` was omitted?
+   - *Answer*: No custom `ThreadPoolTaskExecutor` bean was declared, causing Spring to use `SimpleAsyncTaskExecutor`, creating unbounded platform threads.
 
-- Spring guarantees each singleton is created once and shared — it does NOT guarantee thread-safety.
-- A singleton with **no mutable instance fields** (stateless) is naturally thread-safe.
-- A singleton with **mutable instance fields** requires explicit synchronization.
+3. **Virtual Thread Pinning**: Why is using `synchronized` blocks inside Virtual Threads discouraged in Java 21? What alternative should be used?
+   - *Answer*: It pins the virtual thread to its OS carrier thread, preventing the JVM from unmounting it during blocking I/O. Use `ReentrantLock` instead.
 
-```java
-// Thread-SAFE singleton (no mutable state)
-@Service
-public class UserService {
-    private final UserRepository repo; // final, immutable
-    public User findUser(Long id) { return repo.findById(id).orElseThrow(); }
-}
+4. **Context Loss**: A user logs in, but an `@Async` method throws `NullPointerException` when calling `SecurityContextHolder.getContext().getAuthentication()`. Why, and how is it resolved?
+   - *Answer*: `SecurityContextHolder` uses per-thread `ThreadLocal`. Fix it by configuring a `TaskDecorator` or using `DelegatingSecurityContextExecutor`.
 
-// NOT thread-safe singleton (mutable state)
-@Service
-public class CounterService {
-    private int count = 0;           // ← mutable instance field
-    public void increment() { count++; } // race condition!
-}
-```
-
-### Trap 2: "What Does @Async Use by Default?"
-
-**Answer:** `SimpleAsyncTaskExecutor` — which **creates a new thread for every invocation** with no pooling. This is a production disaster under load.
-
-**Always configure a `ThreadPoolTaskExecutor` before using `@Async` in production.**
-
-### Trap 3: "Can You Make @Async Synchronized?"
-
-**Answer:** Technically yes, but it defeats the purpose:
-
-```java
-@Async
-public synchronized CompletableFuture<Void> serialAsync(String data) {
-    // Only one thread at a time due to synchronized
-    // @Async puts it on a pool thread, synchronized serializes pool threads
-    // Net effect: serialized async — you're just offloading to a single pool thread
-    process(data);
-    return CompletableFuture.completedFuture(null);
-}
-```
-
-Better alternatives: use a `SingleThreadExecutor`, or a `LinkedBlockingQueue` with a single consumer.
-
-### Trap 4: "ThreadLocal in @Async Context"
-
-```java
-// ❌ ThreadLocal does NOT propagate to @Async threads
-ThreadLocal<String> local = new ThreadLocal<>();
-local.set("request-context");
-
-asyncService.doWork(); // @Async runs on a DIFFERENT thread — local.get() returns NULL!
-
-// Fix: capture and manually pass
-String ctx = local.get();
-CompletableFuture.runAsync(() -> {
-    local.set(ctx); // set on async thread
-    try { doWork(); } finally { local.remove(); }
-}, executor);
-```
-
-### Trap 5: "Singleton Bean with Prototype Dependency"
-
-```java
-// ❌ Singleton holds a reference to ONE prototype bean — defeats prototype scope!
-@Service
-public class SingletonService {
-    @Autowired
-    private PrototypeBean prototypeBean; // Injected ONCE at startup!
-    // Every call to prototypeBean uses the SAME instance — not a new one each time
-}
-
-// ✅ Fix: use ApplicationContext.getBean() or ObjectFactory/Provider
-@Service
-public class CorrectSingletonService {
-    @Autowired
-    private ObjectProvider<PrototypeBean> prototypeBeanProvider;
-
-    public void doWork() {
-        PrototypeBean bean = prototypeBeanProvider.getObject(); // new instance each call
-        bean.execute();
-    }
-}
-```
-
-### Trap 6: "volatile vs AtomicInteger"
-
-```java
-private volatile int count = 0;
-count++; // NOT atomic! Still a race condition!
-// volatile only ensures visibility — not atomicity of compound operations
-
-private final AtomicInteger atomicCount = new AtomicInteger(0);
-atomicCount.incrementAndGet(); // atomic — uses CAS hardware instruction — NO race condition
-```
-
-### Trap 7: "synchronized vs ReentrantLock"
-
-| | `synchronized` | `ReentrantLock` |
-|---|---|---|
-| Syntax | Keyword (simpler) | Object (more code) |
-| Fairness | No (barging) | Optional |
-| Interruptible | No | `lockInterruptibly()` |
-| Try with timeout | No | `tryLock(n, unit)` |
-| Multiple conditions | One (`wait`/`notify`) | Multiple (`newCondition()`) |
-| Automatic release | Yes (JVM manages) | No (must `unlock()` in `finally`!) |
-
-> [!WARNING]
-> Forgetting to call `lock.unlock()` in a `finally` block with `ReentrantLock` causes permanent deadlock. This is the primary argument for `synchronized` in simple cases.
-
----
-
-## 🔍 Deep Dive — JMM and Happens-Before
-
-The **Java Memory Model (JMM)** defines rules for when one thread's writes are visible to another thread's reads. Without visibility guarantees, CPUs and compilers reorder operations for performance.
-
-### Happens-Before Rules
-
-A happens-before (HB) relationship means: *all writes done by A before the HB point are visible to B after the HB point.*
-
-| Action | Happens-Before |
-|---|---|
-| `synchronized` exit | subsequent `synchronized` entry on same monitor |
-| `volatile` write | subsequent `volatile` read of same variable |
-| `Thread.start()` | all actions in the started thread |
-| Thread completion | `Thread.join()` returns |
-| Object construction | `final` fields seen by all threads |
-| `CompletableFuture.complete()` | subsequent reads of the result |
-
-```java
-// Without HB, this can print 0 (CPU reorders writes/reads)
-int x = 0;
-boolean ready = false;
-
-// Thread A:
-x = 42;      // Write 1
-ready = true; // Write 2 — CPU may reorder before Write 1!
-
-// Thread B:
-while (!ready); // Read 2
-System.out.println(x); // Read 1 — may see 0 without HB guarantee!
-
-// Fix: make 'ready' volatile — volatile write happens-before volatile read
-volatile boolean ready = false;
-// Now: x=42 happens-before ready=true (program order for Thread A)
-//       ready=true (write) happens-before !ready (read in Thread B)
-//       therefore: x=42 happens-before printing x → x is visible as 42
-```
-
----
-
-## 📝 Summary & Key Takeaways
-
-| Topic | Key Principle |
-|---|---|
-| Spring Singleton | One instance, many threads — stateless beans are safe, stateful are not |
-| ThreadLocal | Per-thread storage; always clear in `finally`; NOT propagated to `@Async` |
-| Race Conditions | Check-then-act and read-modify-write are the two root patterns |
-| `synchronized` | Mutual exclusion + visibility; avoid on `this` in proxied beans |
-| `volatile` | Visibility only — not atomic for compound ops like `count++` |
-| `AtomicInteger` | Lock-free CAS atomicity; use `LongAdder` for high-contention counters |
-| `ConcurrentHashMap` | Lock-free reads, fine-grained writes; use `computeIfAbsent` for atomic put-if-absent |
-| `@Async` | Must be public, non-self-call; configure `ThreadPoolTaskExecutor`; default is `SimpleAsyncTaskExecutor` (DO NOT USE in prod) |
-| Thread Pool | Understand core/max/queue interaction; queue fills before max threads spawn |
-| `CompletableFuture` | `thenApply` (sync), `thenCompose` (flatmap), `allOf` (wait all), `exceptionally` (catch) |
-| Optimistic Locking | `@Version` — no DB lock; retries on `OptimisticLockException` |
-| Pessimistic Locking | `SELECT FOR UPDATE`; use timeouts to prevent deadlocks |
-| Distributed Locks | `synchronized` is JVM-local; use Redisson for Redis-based cluster locks |
-| WebFlux | Never block the event loop — use `subscribeOn(Schedulers.boundedElastic())` |
-| Virtual Threads | Java 21 — lightweight, great for I/O; don't pool them |
-| JMM | `volatile` + `synchronized` provide happens-before guarantees |
-
----
-
-## ❓ Practice Questions
-
-1. You have a `@Service` singleton with a `private List<String> cache = new ArrayList<>()` that's populated on first use. What are the concurrency problems, and how would you fix them without removing the field?
-
-2. Your Spring Boot app uses `@Async` to send emails. Under load testing, you observe `OutOfMemoryError: unable to create new native thread`. What is the likely cause and how do you fix it?
-
-3. Explain exactly why `count++` is not thread-safe even when `count` is `volatile`. What should you use instead?
-
-4. An `@Async` method needs to access `SecurityContextHolder.getContext()`. In your test, it returns `null`. Why, and what are three ways to fix it?
-
-5. You have two services that each lock tables in opposite order:
-   - ServiceA: locks `orders` then `payments`
-   - ServiceB: locks `payments` then `orders`
-   What problem does this cause and how do you fix it?
-
-6. What is the difference between `thenApply` and `thenCompose` in `CompletableFuture`? When would you use each?
-
-7. A colleague says "I used `@Transactional` on my `@Async` method, so the async operation participates in the caller's transaction." Is this correct? Explain what actually happens.
-
-8. In a Kubernetes deployment with 5 pods, a `synchronized` block in a singleton Spring bean is meant to prevent duplicate order processing. Will this work? Why or why not, and what should you use instead?
-
-9. Your `@Entity` has `@Version Long version`. Under high concurrency, you observe many `OptimisticLockingFailureException` errors. What does this indicate about your data access pattern, and would you switch to pessimistic locking? Justify your answer.
-
-10. Explain the double-checked locking pattern. Why is `volatile` mandatory for it to work correctly? What is the JMM issue it addresses?
+5. **Optimistic vs Pessimistic**: A ticket booking system experiences 2,000 requests/second for 50 concert seats. Which locking strategy should be chosen and why?
+   - *Answer*: Pessimistic write locking or atomic database decrement (`UPDATE seats SET booked = true WHERE id = ? AND booked = false`). Optimistic locking will cause 1,950 failed version collisions and thrash CPU with retries.

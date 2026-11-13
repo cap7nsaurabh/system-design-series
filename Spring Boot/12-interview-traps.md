@@ -1,674 +1,1491 @@
-# 🧨 Spring Boot Interview Traps & Gotchas: The Ultimate Guide
+# 12 — Spring Boot Interview Traps & Deep Architectural Gotchas
 
-Welcome to the definitive guide on Spring Boot interview traps and advanced gotchas. This module is the "crown jewel" designed to elevate your understanding from an intermediate level to a senior engineer level by exploring the dark corners, the counter-intuitive behaviors, and the nuanced inner workings of the Spring Framework.
-
----
-
-## Category 1: Spring AOP Proxy Traps
-
-### Why `@Transactional` Doesn't Work on Private Methods
-
-**The Trap:** You annotate a `private` method with `@Transactional`, but if an exception is thrown, the transaction doesn't roll back.
-
-**The Explanation:**
-Spring relies on proxy-based Aspect-Oriented Programming (AOP). When you annotate a bean, Spring doesn't inject the actual bean; it injects a *proxy* wrapper. This proxy intercepts calls to apply behaviors (like starting a transaction).
-
-However, proxies can only intercept calls originating from *outside* the bean, and they can only override or implement `public` (or package-private in CGLIB) methods. JDK dynamic proxies require interfaces (all methods are public), and CGLIB creates a subclass (cannot override `private` or `final` methods).
-
-```mermaid
-flowchart TD
-    Client -->|Calls public method| Proxy
-    Proxy -->|Starts Transaction| Interceptor
-    Interceptor -->|Calls| TargetBean
-    TargetBean -->|Calls private method| TargetBean
-    TargetBean -.->|No Interception!| TargetBean
-```
-
-> [!WARNING] **Interview Trap**
-> An interviewer might ask: "If I call a public `@Transactional` method from another public method in the same class, does the transaction apply?"
-> **Answer:** No. This is the **self-invocation** problem. The internal call does not go through the proxy.
-
-### Self-Invocation Problem - 5 Different Solutions
-
-When a method in a class calls another method in the *same* class, AOP interceptors (`@Transactional`, `@Async`, `@Cacheable`) are completely ignored because the call happens on the target object `this`, not on the proxy.
-
-**Solutions:**
-1. **Self-Injection:** Inject the bean into itself.
-   ```java
-   @Service
-   public class MyService {
-       @Autowired
-       private MyService self;
-       
-       public void methodA() { self.methodB(); } // Goes through proxy!
-       @Transactional public void methodB() {}
-   }
-   ```
-2. **Refactor to another class:** The cleanest approach. Move `methodB` to another bean and inject it.
-3. **ApplicationContext / BeanFactory:** Fetch the bean programmatically.
-   ```java
-   MyService proxy = applicationContext.getBean(MyService.class);
-   proxy.methodB();
-   ```
-4. **`AopContext.currentProxy()`:** Expose the proxy. Requires `@EnableAspectJAutoProxy(exposeProxy = true)`.
-   ```java
-   ((MyService) AopContext.currentProxy()).methodB();
-   ```
-5. **AspectJ Weaving (Compile-time/Load-time):** Ditch Spring's proxy-based AOP and use true byte-code modification.
-
-### Why `@Async` Doesn't Work on Same-Class Calls
-Just like `@Transactional`, `@Async` relies on AOP. If you call an `@Async` method from within the same class, the code runs synchronously on the same thread because the call bypasses the proxy that submits the task to a thread pool.
-
-### Why `@Cacheable` Doesn't Work on Same-Class Calls
-Same AOP proxy limitation. If `methodA()` calls `@Cacheable methodB()`, the cache is ignored.
-
-### Why `@Scheduled` Doesn't Work Without `@EnableScheduling`
-`@Scheduled` is ignored unless a bean post-processor is registered to scan for it. `@EnableScheduling` registers the `ScheduledAnnotationBeanPostProcessor`. Without it, Spring parses the annotation but does nothing.
-
-### CGLIB vs JDK Dynamic Proxy
-- **JDK Dynamic Proxy:** Used when a class implements an interface. It proxies the interface.
-- **CGLIB Proxy:** Used when a class does not implement an interface. It creates a subclass dynamically.
-
-> [!NOTE]
-> As of Spring Boot 2.0, **CGLIB is the default** for all AOP proxies (configured via `spring.aop.proxy-target-class=true`).
+> **Module Goal:** Master the treacherous edge cases, subtle concurrency traps, AOP proxy bypasses, transactional rollbacks, and bean scope misconfigurations in Spring Boot 3.x (Java 17/21). For every classic architectural failure, this guide provides the exact root cause, broken anti-pattern code, and all viable production-grade resolution approaches structured with **Scenario**, **Use-Case**, **Benefits Over Others**, and **Fully Documented Code Examples**.
 
 ---
 
-## Category 2: Bean & DI Traps
+## Table of Contents
 
-### Injecting Prototype Bean into Singleton
-**The Trap:** You want a new instance of a bean every time, so you annotate it with `@Scope("prototype")`. You inject it into a `@Service` (which is a singleton). 
-**Gotcha:** You only get *one* instance! The injection happens *once* at startup when the singleton is created.
+1. [AOP Proxy Architecture & Self-Invocation Traps](#1-aop-proxy-architecture--self-invocation-traps)
+   - [The Trap: Self-Invocation Bypassing `@Transactional`, `@Async`, and `@Cacheable`](#the-trap-self-invocation-bypassing-transactional-async-and-cacheable)
+   - [Approach 1: Refactor to Dedicated Collaborator Service (Architectural Separation)](#approach-1-refactor-to-dedicated-collaborator-service-architectural-separation)
+   - [Approach 2: Self-Injection via `@Lazy` / `ObjectProvider<T>`](#approach-2-self-injection-via-lazy--objectprovidert)
+   - [Approach 3: Programmatic Execution (`TransactionTemplate`, `TaskExecutor`, `CacheManager`)](#approach-3-programmatic-execution-transactiontemplate-taskexecutor-cachemanager)
+   - [Approach 4: `AopContext.currentProxy()` with Expose-Proxy Configuration](#approach-4-aopcontextcurrentproxy-with-expose-proxy-configuration)
+   - [Approach 5: Compile-Time / Load-Time AspectJ Bytecode Weaving](#approach-5-compile-time--load-time-aspectj-bytecode-weaving)
+2. [Bean Scope & Dependency Injection Traps](#2-bean-scope--dependency-injection-traps)
+   - [The Trap: Prototype Scope State Mutation Inside Singleton Beans](#the-trap-prototype-scope-state-mutation-inside-singleton-beans)
+   - [Approach 1: Method Injection via `@Lookup`](#approach-1-method-injection-via-lookup)
+   - [Approach 2: Programmatic Bean Retrieval via `ObjectProvider<T>`](#approach-2-programmatic-bean-retrieval-via-objectprovidert)
+   - [Approach 3: Target Class Scoped Proxies (`ScopedProxyMode.TARGET_CLASS`)](#approach-3-target-class-scoped-proxies-scopedproxymodetarget_class)
+   - [Approach 4: Dedicated Factory Bean Pattern](#approach-4-dedicated-factory-bean-pattern)
+3. [Transactional Boundary & Rollback Traps](#3-transactional-boundary--rollback-traps)
+   - [The Trap: Checked Exceptions Committing Dirty State Silently](#the-trap-checked-exceptions-committing-dirty-state-silently)
+   - [Approach 1: Explicit Declarative Rollback (`rollbackFor = Exception.class`)](#approach-1-explicit-declarative-rollback-rollbackfor--exceptionclass)
+   - [Approach 2: Programmatic Rollback via `TransactionAspectSupport`](#approach-2-programmatic-rollback-via-transactionaspectsupport)
+   - [Approach 3: Custom Domain Unchecked Exception Wrapping](#approach-3-custom-domain-unchecked-exception-wrapping)
+   - [Approach 4: Programmatic `TransactionTemplate` with Custom Callback](#approach-4-programmatic-transactiontemplate-with-custom-callback)
+4. [JPA & Persistence Context Traps](#4-jpa--persistence-context-traps)
+   - [The Trap: `LazyInitializationException` Beyond the Session Boundary](#the-trap-lazyinitializationexception-beyond-the-session-boundary)
+   - [Approach 1: JPQL Explicit `JOIN FETCH`](#approach-1-jpql-explicit-join-fetch)
+   - [Approach 2: Dynamic JPA `@EntityGraph`](#approach-2-dynamic-jpa-entitygraph)
+   - [Approach 3: DTO Record Constructor Projection (Zero Entity Overhead)](#approach-3-dto-record-constructor-projection-zero-entity-overhead)
+   - [Approach 4: Programmatic `TransactionTemplate` Stack-Confined Loading](#approach-4-programmatic-transactiontemplate-stack-confined-loading)
+5. [Concurrency, Async & ThreadContext Traps](#5-concurrency-async--threadcontext-traps)
+   - [The Trap: `SimpleAsyncTaskExecutor` Memory Starvation & ThreadContext Loss](#the-trap-simpleasynctaskexecutor-memory-starvation--threadcontext-loss)
+   - [Approach 1: Bounded `ThreadPoolTaskExecutor` with `TaskDecorator`](#approach-1-bounded-threadpooltaskexecutor-with-taskdecorator)
+   - [Approach 2: Java 21 Virtual Threads (`VirtualThreadTaskExecutor`)](#approach-2-java-21-virtual-threads-virtualthreadtaskexecutor)
+   - [Approach 3: Micrometer Context Propagation Pipeline](#approach-3-micrometer-context-propagation-pipeline)
+6. [Web Layer & Servlet Filter Traps](#6-web-layer--servlet-filter-traps)
+   - [The Trap: Servlet Filter Exceptions Bypassing `@RestControllerAdvice`](#the-trap-servlet-filter-exceptions-bypassing-restcontrolleradvice)
+   - [Approach 1: Delegating to `HandlerExceptionResolver` Inside Filter](#approach-1-delegating-to-handlerexceptionresolver-inside-filter)
+   - [Approach 2: Direct RFC 7807 `ProblemDetail` Writing via `ObjectMapper`](#approach-2-direct-rfc-7807-problemdetail-writing-via-objectmapper)
+   - [Approach 3: Forwarding to Container Error Endpoint via `RequestDispatcher`](#approach-3-forwarding-to-container-error-endpoint-via-requestdispatcher)
+7. [Comprehensive Trap Matrix & Senior Engineer Cheat Sheet](#7-comprehensive-trap-matrix--senior-engineer-cheat-sheet)
 
-**Solutions:**
-1. **`@Lookup` Method Injection:** 
-   ```java
-   @Component
-   public class MySingleton {
-       @Lookup
-       public MyPrototype getPrototype() { return null; } // Spring overrides this!
-   }
-   ```
-2. **ObjectFactory / ObjectProvider:**
-   ```java
-   @Autowired private ObjectProvider<MyPrototype> provider;
-   public void doWork() { MyPrototype p = provider.getObject(); }
-   ```
-3. **ApplicationContext:** `context.getBean(MyPrototype.class);`
+---
 
-### `@Autowired` on Static Fields
-**The Trap:**
+## 1. AOP Proxy Architecture & Self-Invocation Traps
+
+### The Trap: Self-Invocation Bypassing `@Transactional`, `@Async`, and `@Cacheable`
+
+#### The Failure Scenario
+A senior developer creates an `OrderProcessingService`. The public entrypoint `processOrder()` executes preliminary validations and then invokes `executePaymentTransaction()` and `sendOrderConfirmationEmailAsync()` defined within the **same** class.
+
 ```java
-@Component
-public class Utils {
+// ❌ BROKEN CODE: Self-invocation completely bypasses Spring AOP proxies!
+@Service
+@Slf4j
+public class OrderProcessingService {
+
     @Autowired
-    private static MyService myService; // ALWAYS NULL!
+    private OrderRepository orderRepository;
+
+    public void processOrder(Long orderId) {
+        log.info("Processing order {}", orderId);
+        // Direct method call on 'this' pointer!
+        // The CGLIB proxy is NEVER invoked!
+        this.executePaymentTransaction(orderId);
+        this.sendOrderConfirmationEmailAsync(orderId);
+    }
+
+    @Transactional // ⚠️ TRAP: IGNORED! Runs in calling thread without transaction!
+    public void executePaymentTransaction(Long orderId) {
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        order.setStatus(OrderStatus.PAID);
+        orderRepository.save(order);
+        if (true) throw new RuntimeException("Payment gateway crashed!"); 
+        // ⚠️ NEVER ROLLS BACK: The database row remains PAID!
+    }
+
+    @Async // ⚠️ TRAP: IGNORED! Runs synchronously on Tomcat HTTP request thread!
+    public void sendOrderConfirmationEmailAsync(Long orderId) {
+        // Blocks the HTTP response for 5 seconds while sending SMTP mail!
+        sendEmailOverSmtp(orderId);
+    }
 }
 ```
-**Why it fails:** Spring injects dependencies into *instances* (objects). Static fields belong to the *class*. Spring does not scan static fields for injection by default.
-**Solution:** Autowire the setter method and remove the `static` modifier from the method.
+
+#### Why It Fails Internally
+Spring implements declarative behaviors using **Dynamic AOP Proxies** (CGLIB subclasses by default in Spring Boot 2.x and 3.x). When an external client calls `orderProcessingService.processOrder()`, it invokes the CGLIB proxy wrapper.
+
+```
+Caller (e.g. Controller)
+       │
+       ▼
+┌──────────────────────────────────────┐
+│       OrderProcessingService Proxy   │  <--- CGLIB Subclass
+│  Intercepts processOrder()           │
+└──────────────────┬───────────────────┘
+                   │ Delegates
+                   ▼
+┌──────────────────────────────────────┐
+│     Target Instance (Actual Object)  │
+│  void processOrder() {               │
+│      this.executePaymentTransaction()│  <--- DIRECT 'this' INVOCATION!
+│  }                                   │       Proxy is completely bypassed!
+│  void executePaymentTransaction() {} │       No TransactionInterceptor!
+└──────────────────────────────────────┘
+```
+
+When `processOrder()` calls `this.executePaymentTransaction()`, it invokes the method directly on the internal JVM object reference `this`. It does **not** route through the CGLIB interceptor chain (`TransactionInterceptor`, `AsyncExecutionInterceptor`, `CacheInterceptor`).
+
+---
+
+### Approach 1: Refactor to Dedicated Collaborator Service (Architectural Separation)
+
+#### Scenario
+Complex domain services where business workflows encompass multiple transactional, asynchronous, or cached operations.
+
+#### Use-Case
+Recommended default design pattern adhering strictly to the **Single Responsibility Principle (SRP)**. Business workflows belong in an orchestrator, while transactional mutations belong in focused collaborator services.
+
+#### Benefits Over Others
+- **Zero Framework Magic:** Works universally without special proxy flags, reflection, or bytecode agents.
+- **Superior Testability:** Collaborators can be cleanly mocked in unit tests without configuring Spring AOP test runners.
+- **Clean Architecture:** Eliminates cyclic dependencies and bloated 1,000-line services.
+
+#### Production-Grade Code Example
+
 ```java
-private static MyService myService;
-@Autowired
-public void setMyService(MyService service) {
-    Utils.myService = service;
+package com.example.traps.aop.solution1;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class OrderOrchestratorService {
+
+    private final OrderPaymentService paymentService;
+    private final OrderNotificationService notificationService;
+
+    public void processOrder(Long orderId) {
+        log.info("Orchestrating order processing for ID: {}", orderId);
+
+        // Invokes CGLIB proxy of OrderPaymentService -> @Transactional is fully active!
+        paymentService.executePaymentTransaction(orderId);
+
+        // Invokes CGLIB proxy of OrderNotificationService -> @Async executes on thread pool!
+        notificationService.sendOrderConfirmationEmailAsync(orderId);
+    }
+}
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+class OrderPaymentService {
+
+    @Transactional
+    public void executePaymentTransaction(Long orderId) {
+        log.info("Executing payment transaction inside active transaction. Thread: {}", Thread.currentThread().getName());
+        // Database mutation code here...
+    }
+}
+
+@Service
+@Slf4j
+class OrderNotificationService {
+
+    @Async("taskExecutor")
+    public void sendOrderConfirmationEmailAsync(Long orderId) {
+        log.info("Dispatching email notification asynchronously on thread: {}", Thread.currentThread().getName());
+        // SMTP dispatch here...
+    }
 }
 ```
 
-### Circular Dependencies
-**The Trap:** Bean A depends on Bean B, and Bean B depends on Bean A.
-- **Field/Setter Injection:** Spring *can* resolve this natively by creating A, caching it early, then creating B and injecting early-A, then finishing A.
-- **Constructor Injection:** Spring *cannot* resolve this natively because it needs a fully constructed B to call A's constructor, and vice-versa. (Exception: `BeanCurrentlyInCreationException`).
-
-**Spring Boot 2.6+ Changes:** Circular dependencies are now **prohibited by default**. You must explicitly set `spring.main.allow-circular-references=true`.
-**Solution:** Use `@Lazy` on one of the constructor parameters.
-
-### Multiple Beans of Same Type: `@Primary` vs `@Qualifier`
-If you have multiple implementations of an interface:
-- `@Primary`: Default fallback. If multiple exist, pick this one unless otherwise specified.
-- `@Qualifier`: Explicit targeting. "Give me the bean named 'redisCache'".
-> [!IMPORTANT]
-> If a bean has `@Primary` and the injection point has `@Qualifier("otherBean")`, `@Qualifier` wins. Explicit beats implicit.
-
-### `@Component` on Inner Class
-Inner classes must be `static` to be instantiated by Spring independently. Non-static inner classes require an instance of the outer class, which Spring's container cannot easily provide out-of-the-box.
-
-### BeanNotFound vs NoUniqueBeanDefinitionException
-- `NoSuchBeanDefinitionException`: No bean of that type exists.
-- `NoUniqueBeanDefinitionException`: Multiple exist, but Spring doesn't know which one to pick (missing `@Qualifier` or `@Primary`).
-
 ---
 
-## Category 3: Transaction Traps
+### Approach 2: Self-Injection via `@Lazy` / `ObjectProvider<T>`
 
-### `@Transactional` on Checked Exceptions
-**The Biggest Trap:**
+#### Scenario
+Legacy services or monolithic domain classes where extracting dozens of methods into separate classes would create an explosion of tiny, artificial service classes.
+
+#### Use-Case
+Adding `@Async` or `@Transactional` caching to an internal utility method without undertaking a full architectural refactoring.
+
+#### Benefits Over Others
+- **Low Refactoring Overhead:** Requires modifying only the existing class without creating new files.
+- **Guaranteed Proxy Invocation:** Route internal method calls through the injected self-proxy reference.
+- **Cycle Prevention:** Modern Spring Boot prohibits circular dependencies by default; injecting with `@Lazy` or `ObjectProvider<T>` breaks the startup construction cycle cleanly.
+
+#### Production-Grade Code Example
+
 ```java
-@Transactional
-public void doWork() throws IOException {
-    db.save(entity);
-    throw new IOException("Failed!"); // TRANSACTION COMMITS!
+package com.example.traps.aop.solution2;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Slf4j
+public class SelfInjectedReportService {
+
+    // Option A: Field/Setter self-injection with @Lazy (Breaks circular reference check)
+    private final ObjectProvider<SelfInjectedReportService> selfProvider;
+
+    public SelfInjectedReportService(ObjectProvider<SelfInjectedReportService> selfProvider) {
+        this.selfProvider = selfProvider;
+    }
+
+    public void generateMonthlyReport(String reportType) {
+        log.info("Starting monthly report generation for type: {}", reportType);
+
+        // Fetch the CGLIB proxy from the ObjectProvider
+        SelfInjectedReportService proxy = selfProvider.getObject();
+
+        // Calling proxy.fetchCachedData() invokes CacheInterceptor!
+        String data = proxy.fetchCachedData(reportType);
+
+        // Calling proxy.persistAuditAsync() submits to ThreadPoolTaskExecutor!
+        proxy.persistAuditAsync(reportType, data.length());
+    }
+
+    @Cacheable(value = "report-data", key = "#reportType")
+    public String fetchCachedData(String reportType) {
+        log.info("Cache miss! Querying expensive database report data for: {}", reportType);
+        return "Comprehensive financial data for " + reportType;
+    }
+
+    @Async("fileProcessingExecutor")
+    public void persistAuditAsync(String reportType, int bytes) {
+        log.info("Persisting audit log asynchronously on thread: {}", Thread.currentThread().getName());
+    }
 }
 ```
-**Explanation:** By default, Spring only rolls back on **Unchecked Exceptions** (`RuntimeException` and `Error`). It does NOT roll back on Checked Exceptions.
-**Solution:** `@Transactional(rollbackFor = Exception.class)`
-
-### Nested `@Transactional` Methods
-If `ServiceA.methodA()` calls `ServiceB.methodB()`, and both are `@Transactional`, they share the **same** physical transaction by default (`Propagation.REQUIRED`). If B fails, the *entire* transaction is marked for rollback. 
-Even if A catches B's exception, the commit at the end of A will fail with `UnexpectedRollbackException`.
-
-### `@Transactional(readOnly = true)`
-- **What it does:** Sets JDBC connection to read-only, optimizing performance. JPA/Hibernate won't flush changes automatically, and doesn't keep dirty-checking snapshots (huge memory save).
-- **What it doesn't do:** It does NOT guarantee that the database will block writes (depends on the DB driver).
-
-### `REQUIRES_NEW` Creating a New Transaction in Same Thread
-`Propagation.REQUIRES_NEW` suspends the current transaction, acquires a **new database connection** from the pool, starts a new transaction, completes it, and then resumes the old one.
-**Gotcha:** If you use this heavily, you can easily exhaust your HikariCP connection pool, leading to deadlocks.
-
-### Transaction Lost in `@Async` Method
-Transactions are bound to `ThreadLocal`. If an `@Transactional` method calls an `@Async` method, the async method runs on a *different thread*. The transaction context is NOT propagated. The async method will run without a transaction (or start a new one).
-
-### LazyInitializationException after Transaction Closes
-When you load a JPA entity with lazy relationships, and you try to access the relationship *after* the `@Transactional` method has finished, Hibernate throws `LazyInitializationException` because the session is closed.
-**Fixes:** EntityGraphs, `JOIN FETCH`, or DTO projections. Do not use `OpenSessionInView` in production.
 
 ---
 
-## Category 4: JPA/Database Traps
+### Approach 3: Programmatic Execution (`TransactionTemplate`, `TaskExecutor`, `CacheManager`)
 
-### N+1 Select Problem
-You load 100 Authors. Then you iterate through them and get their Books. 
-Result: 1 query for authors, 100 queries for books (101 queries total).
-**Solution:** Use `@EntityGraph` or `JOIN FETCH` in your JPQL repository method.
+#### Scenario
+High-throughput services requiring precise programmatic boundaries where declarative annotations lack granular control (e.g., catching exceptions inside a sub-transaction without marking the outer transaction rollback-only).
 
-### `CascadeType.ALL` Dangers on `@ManyToMany`
-If you put `CascadeType.REMOVE` on a `@ManyToMany` relationship, deleting one entity will delete all associated entities, which might delete entities associated with *other* parents! 
-**Gotcha:** Never use `CascadeType.ALL` on `@ManyToMany`. Use `CascadeType.PERSIST` and `MERGE`.
+#### Use-Case
+Complex transactional flows where only 3 lines of a 100-line method need database locks, or where caching must be conditionally checked without dynamic SpEL evaluations.
 
-### Owning Side of Bidirectional Relationship
-In a bidirectional relationship, the side with `mappedBy` is the **inverse side**. The other is the **owning side**. 
-**Trap:** If you only add the entity to the collection on the inverse side and save, the foreign key in the database will be `NULL`. You must update the owning side!
+#### Benefits Over Others
+- **Complete AOP Independence:** 100% immune to self-invocation proxy bypass; operates on pure object composition.
+- **Fine-Grained Exception Handling:** Catch checked exceptions directly within transaction callbacks and return custom domain results.
+- **Connection Efficiency:** Keeps the database connection open only for the 10 milliseconds of the database write, rather than the entire 5 seconds of the outer business method.
 
-### `SEQUENCE` vs `IDENTITY` for Batch Inserts
-If you use `@GeneratedValue(strategy = GenerationType.IDENTITY)`, Hibernate **disables batch inserts**. Why? Because it needs the ID immediately after the insert statement, forcing a round-trip per row.
-**Solution:** Use `GenerationType.SEQUENCE` for batching.
+#### Production-Grade Code Example
 
-### FetchType.EAGER Causes Extra Queries
-Even if you don't access an `@ManyToOne` field, `FetchType.EAGER` forces Hibernate to fetch it. If you load 100 entities, it might spawn 100 extra queries if you aren't careful, overriding your main query logic.
-
-### `@Transient` Field Not Ignored by Jackson
-JPA's `@Transient` ignores the field for database mapping. However, Jackson (JSON serializer) will **still include it in the JSON response**. 
-**Solution:** Use `@JsonIgnore` as well.
-
-### `EntityManager` Not Thread-Safe
-While the Spring-injected `EntityManager` looks like a singleton, it is actually a proxy that delegates to a thread-bound `EntityManager` associated with the current transaction. Never manually share an unproxied `EntityManager` across threads.
-
----
-
-## Category 5: Concurrency Traps
-
-### Spring Singletons are NOT Thread-Safe
-Spring guarantees only one instance of the bean exists. It does **not** make that instance thread-safe.
-
-### Instance Variables in `@RestController`
-**The Trap:**
 ```java
-@RestController
-public class UserController {
-    private int counter = 0; // DEADLY TRAP
-    
-    @GetMapping("/count")
-    public int count() { return ++counter; }
+package com.example.traps.aop.solution3;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class ProgrammaticOrderService {
+
+    private final TransactionTemplate transactionTemplate;
+    private final TaskExecutor taskExecutor;
+
+    public void processOrderPipeline(Long orderId) {
+        log.info("Initiating order pipeline for: {}", orderId);
+
+        // 1. Non-transactional compute / validation (No DB connection held!)
+        validateClientAccount(orderId);
+
+        // 2. Programmatic Transaction Boundary (Zero AOP proxy dependency!)
+        boolean paymentSuccessful = Boolean.TRUE.equals(transactionTemplate.execute(status -> {
+            try {
+                // DB mutations inside active transaction
+                log.info("Executing transactional database write. Active: {}", status.hasSavepoint());
+                persistPaymentRecord(orderId);
+                return true;
+            } catch (Exception e) {
+                log.error("Payment failed, rolling back programmatic transaction", e);
+                status.setRollbackOnly(); // Explicit programmatic rollback
+                return false;
+            }
+        }));
+
+        if (!paymentSuccessful) {
+            throw new IllegalStateException("Order processing halted due to payment failure");
+        }
+
+        // 3. Programmatic Asynchronous Execution (Zero @Async proxy dependency!)
+        taskExecutor.execute(() -> {
+            log.info("Running background dispatch on worker thread: {}", Thread.currentThread().getName());
+            dispatchWarehouseNotification(orderId);
+        });
+    }
+
+    private void validateClientAccount(Long orderId) {}
+    private void persistPaymentRecord(Long orderId) {}
+    private void dispatchWarehouseNotification(Long orderId) {}
 }
 ```
-**Why:** Hundreds of threads are hitting this singleton simultaneously. `++counter` is not atomic. You will lose updates. Use stateless beans, or `AtomicInteger`.
-
-### `@Async` Uses `SimpleAsyncTaskExecutor` by Default
-If you use `@EnableAsync` without defining a `TaskExecutor` bean, Spring uses `SimpleAsyncTaskExecutor`.
-**Gotcha:** This executor **does not pool threads**. It creates a *brand new thread* for every single `@Async` call. Under load, you will hit OutOfMemoryError. Always define a `ThreadPoolTaskExecutor`.
-
-### ThreadLocal in `@Async` (Lost!)
-`ThreadLocal` variables (MDC context for logging, custom tenant IDs) are lost when control moves to the `@Async` thread. 
-
-### SecurityContext in `@Async`
-Spring Security's context is also stored in a `ThreadLocal`. By default, it is lost in `@Async`.
-**Solution:** Use `DelegatingSecurityContextExecutor` or set `@EnableAsync` and context holder strategies appropriately.
-
-### `CompletableFuture.get()` Blocking the Thread
-If you return a `CompletableFuture` from an `@Async` method, and then immediately call `.get()` in the calling thread, you have defeated the purpose of async. The calling thread is now completely blocked waiting for the result.
 
 ---
 
-## Category 6: Security Traps
+### Approach 4: `AopContext.currentProxy()` with Expose-Proxy Configuration
 
-### `ROLE_` Prefix with `hasRole` vs `hasAuthority`
-- `hasAuthority("ADMIN")` checks for an authority literally named "ADMIN".
-- `hasRole("ADMIN")` automatically appends `ROLE_` and checks for "ROLE_ADMIN".
-**Gotcha:** Mixing these up will cause unexpected 403 Forbidden errors.
+#### Scenario
+Legacy monolithic codebases where refactoring classes or injecting collaborator objects is prohibited by project constraints.
 
-### CSRF Disabled with Stateless Sessions
-If you have a stateless REST API (using JWTs, no sessions), CSRF protection is generally unnecessary and can block requests. However, you must explicitly disable it (`csrf().disable()`), or Spring Security will block POST/PUT requests by default.
+#### Use-Case
+Quickly fixing self-invocation in existing classes by explicitly retrieving the active proxy from the Spring `ThreadLocal` context.
 
-### JWT `alg:none` Vulnerability
-If you implement custom JWT parsing, ensure you validate the algorithm. Attackers can change the header to `alg:none` and strip the signature, and poorly written parsers will accept it. Always use well-vetted libraries (e.g., JJWT) and enforce the expected algorithm.
+#### Benefits Over Others
+- **Zero Code Structural Changes:** No class refactoring or constructor injection required.
+- **Preserves Existing Method Signatures:** Directly resolves the current executing proxy.
 
-### Method Security on Private Methods
-Like `@Transactional`, `@PreAuthorize` relies on AOP. It **does not work** on private methods or self-invocations.
+#### Trade-offs & Limitations
+- **Couples Code to Spring AOP:** Pollutes domain code with framework-internal APIs (`AopContext`).
+- **Requires Global Flag:** Throws `IllegalStateException: Cannot find current proxy` if `@EnableAspectJAutoProxy(exposeProxy = true)` is omitted.
 
-### `permitAll()` But Spring Security Still Processes OPTIONS
-CORS preflight requests (OPTIONS) must be explicitly allowed. Even if an endpoint is `permitAll()`, an OPTIONS request might be blocked if cors configuration isn't properly wired into the security chain.
-**Fix:** `http.cors()` and `requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()`
+#### Production-Grade Code Example
 
----
+```java
+package com.example.traps.aop.solution4;
 
-## Category 7: Configuration Traps
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.aop.framework.AopContext;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.EnableAspectJAutoProxy;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-### `@Value` with SpEL in `@Configuration`
-Using `@Value("${my.prop}")` is common. But what if it's a list?
-`@Value("#{'${my.list}'.split(',')}")` uses Spring Expression Language (SpEL) to parse it. 
-**Gotcha:** If `my.list` is not defined, this throws a nasty startup error. Use default values: `@Value("${my.list:default}")`.
+@Configuration
+@EnableAspectJAutoProxy(exposeProxy = true) // ⚠️ CRITICAL: Exposes proxy to ThreadLocal
+class AopExposureConfig {}
 
-### `@ConfigurationProperties` Not Working
-You created a class annotated with `@ConfigurationProperties("app")`, but the fields are null.
-**Trap 1:** You forgot `@Component` or `@EnableConfigurationProperties`.
-**Trap 2:** You forgot standard getters and setters (Spring binds via setters).
+@Service
+@Slf4j
+public class ExposedProxyService {
 
-### Profiles Not Activating
-Setting `spring.profiles.active=prod` in `application-dev.yml` does nothing if you are running the `dev` profile. The active profile must be provided via JVM args (`-Dspring.profiles.active=prod`) or OS environment variables (`SPRING_PROFILES_ACTIVE`).
+    public void outerEntrypoint() {
+        log.info("Executing outer entrypoint on thread: {}", Thread.currentThread().getName());
 
-### `application.properties` vs `application.yml` Precedence
-If you have both in the same directory, which wins?
-In Spring Boot 2.4.0+, `.properties` and `.yml` are processed in a unified way, but if they define the exact same key, `.properties` generally overrides `.yml` due to alphabetical file loading, but rely on document order. Better rule: **never mix them in the same project**.
+        // Retrieve the current Spring AOP proxy from ThreadLocal
+        ExposedProxyService currentProxy = (ExposedProxyService) AopContext.currentProxy();
 
-### Environment Variable Override Precedence
-Spring Boot has a strict property overriding order. 
-Command line args > `SPRING_APPLICATION_JSON` > OS Environment Variables > application.properties.
-**Trap:** To override `spring.datasource.url` via environment variable, you must use `SPRING_DATASOURCE_URL`.
+        // Invoke through the retrieved proxy wrapper -> Interceptors execute!
+        currentProxy.transactionalInnerMethod();
+    }
 
----
-
-## Category 8: Scheduling Traps
-
-### Default Single-Threaded Scheduler
-By default, all `@Scheduled` tasks in a Spring Boot application run on a **single thread pool with size 1**.
-**The Trap:** If `TaskA` takes 10 minutes to run, `TaskB` (scheduled for every minute) will be blocked and will not run for 10 minutes!
-**Solution:** Configure a `ThreadPoolTaskScheduler` bean with a larger pool size.
-
-### Task Killed by Exception Permanently
-If a `@Scheduled` method throws an unhandled exception, that specific execution stops. Fortunately, in Spring, subsequent executions *will* still fire (unlike some older raw TimerTasks). But the current run's remaining logic is lost.
-
-### `fixedRate` vs `fixedDelay` Task Overlap
-- `fixedDelay`: Starts counting the delay *after* the previous execution completes. Never overlaps.
-- `fixedRate`: Starts counting from the *start* of the previous execution.
-**Gotcha:** If `fixedRate=5000` (5s), but the task takes 10s, will they overlap? 
-**NO**. By default, Spring `@Scheduled` tasks are synchronous and do not run concurrently on the same method. The second task will queue up and wait for the first to finish. To make them overlap, you must *also* add `@Async`.
-
-### `@Scheduled` in Multi-Instance Deployment
-If you deploy 5 instances of your Spring Boot app to Kubernetes, your `@Scheduled` task will run **5 times concurrently**!
-**Solution:** Use ShedLock, Quartz, or a distributed message queue to ensure only one instance executes the task.
+    @Transactional
+    public void transactionalInnerMethod() {
+        log.info("Executing transactional inner method with active interceptor!");
+    }
+}
+```
 
 ---
 
-## Category 9: Web Layer Traps
+### Approach 5: Compile-Time / Load-Time AspectJ Bytecode Weaving
 
-### Filter Exception Not Caught by `@ControllerAdvice`
-**The Trap:** You have an `@ExceptionHandler` in your `@ControllerAdvice`. You throw a custom exception from a `Filter` (e.g., JwtAuthenticationFilter). The advice never catches it, and the user gets an ugly Tomcat 500 error page.
-**Why:** `@ControllerAdvice` wraps the DispatcherServlet. Filters sit *outside* the DispatcherServlet in the Servlet Container chain.
-**Solution:** Catch the exception in the filter and use `HandlerExceptionResolver` to forward it to the DispatcherServlet, or write it directly to the response.
+#### Scenario
+High-performance trading systems or deeply layered domain models where methods on `private`, `final`, or `package-private` scopes must participate in transactions, or where non-Spring-managed entities (instantiated via `new`) require dependency injection and transaction boundaries.
 
-### `@PathVariable` Type Mismatch
-If you map `@GetMapping("/users/{id}")` where `id` is an `Integer`, and the user sends `/users/abc`, Spring throws a `MethodArgumentTypeMismatchException`. 
+#### Use-Case
+Complex enterprise systems discarding Spring's proxy model entirely in favor of true AspectJ bytecode weaving (CTW via `ajc` compiler plugin or LTW via JVM `-javaagent`).
 
-### `@RequestBody` required=true Default
-`@RequestBody` is required by default. If the client sends an empty body, Spring throws `HttpMessageNotReadableException` (400 Bad Request). If you want to accept empty bodies, use `@RequestBody(required = false)`.
+#### Benefits Over Others
+- **Interception of `this` Calls:** Bytecode is rewritten directly inside the `.class` file; internal `this.method()` calls are intercepted natively.
+- **Works on `private` and `final` Methods:** Proxies can only override non-final public/protected methods; AspectJ weaves directly into bytecode instructions.
+- **Superior Execution Performance:** Eliminates the method-call overhead of proxy interceptor chains.
 
-### Content Negotiation Issues
-If a client sends `Accept: application/xml` but you only have Jackson JSON on the classpath, Spring returns a `406 Not Acceptable`. Ensure `jackson-dataformat-xml` is included if you need XML support.
+#### Production-Grade Code Example
 
-### Tomcat Default Thread Pool Limits
-Spring Boot's embedded Tomcat defaults to 200 maximum threads (`server.tomcat.threads.max=200`). If you have a slow blocking API, you can easily exhaust these 200 threads, causing subsequent requests to hang or be rejected.
+```xml
+<!-- Maven pom.xml configuration for AspectJ Compile-Time Weaving -->
+<plugin>
+    <groupId>dev.aspectj</groupId>
+    <artifactId>aspectj-maven-plugin</artifactId>
+    <version>1.14</version>
+    <configuration>
+        <complianceLevel>21</complianceLevel>
+        <source>21</source>
+        <target>21</target>
+        <aspectLibraries>
+            <aspectLibrary>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-aspects</artifactId>
+            </aspectLibrary>
+        </aspectLibraries>
+    </configuration>
+    <executions>
+        <execution>
+            <goals>
+                <goal>compile</goal>
+            </goals>
+        </execution>
+    </executions>
+</plugin>
+```
 
-### Max Request Size Exceptions
-If a user uploads a file larger than 1MB, Spring Boot rejects it by default with `MaxUploadSizeExceededException`. 
-**Fix:** Configure `spring.servlet.multipart.max-file-size` and `max-request-size`.
+```java
+package com.example.traps.aop.solution5;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.EnableLoadTimeWeaving;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Service;
+
+@Configuration
+@EnableTransactionManagement(mode = org.springframework.context.annotation.AdviceMode.ASPECTJ)
+class AspectJWeavingConfig {}
+
+@Service
+public class WeavedDomainService {
+
+    public void process() {
+        // With AspectJ weaving, this direct internal call IS intercepted!
+        this.internalTransactionalWork();
+    }
+
+    @Transactional // Works EVEN on private methods with AspectJ!
+    private void internalTransactionalWork() {
+        // Database logic woven directly at bytecode level
+    }
+}
+```
 
 ---
 
-## Category 10: Testing Traps
+## 2. Bean Scope & Dependency Injection Traps
 
-### `@SpringBootTest` Loads Full Context (Slow!)
-**The Trap:** Using `@SpringBootTest` on every unit test.
-**Why it's bad:** It boots the entire Spring application context, starts Tomcat (if web is enabled), connects to DBs, etc. If you have 500 tests, your build will take 30 minutes.
-**Solution:** Use standard JUnit with Mockito (`@ExtendWith(MockitoExtension.class)`) for unit tests. Save `@SpringBootTest` for integration tests.
+### The Trap: Prototype Scope State Mutation Inside Singleton Beans
 
-### `@MockBean` vs `@Mock` - Which creates a Spring bean?
-- `@Mock` (Mockito): Creates a pure Java mock object. Spring doesn't know about it.
-- `@MockBean` (Spring Boot): Creates a mock AND places it into the Spring Application Context, overriding any existing bean of the same type.
-**Gotcha:** Every time you use `@MockBean` in a test class, Spring might have to **dirty the context and reload it**, slowing down your test suite massively. 
+#### The Failure Scenario
+A developer defines a stateful user session validator as `@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)`. They inject this prototype bean directly into a singleton `@Service` via constructor injection.
 
-### `@Transactional` in Tests Auto-Rollback
-If you annotate a test method with `@Transactional`, Spring will execute the test and then **automatically roll back** the transaction at the end. This is great for keeping the DB clean.
-**Trap:** If you test code that creates a transaction with `REQUIRES_NEW`, that sub-transaction commits to the DB permanently, breaking test isolation!
+```java
+// ❌ THE SCOPE MISMATCH TRAP
+@Component
+@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
+public class UserSessionContext {
+    private String userId; // Stateful user context
+    public void setUserId(String userId) { this.userId = userId; }
+    public String getUserId() { return userId; }
+}
 
-### `@WebMvcTest` Doesn't Load `@Service` Beans
-`@WebMvcTest(UserController.class)` only loads the Web layer (Controllers, Filters, ControllerAdvice). It completely ignores `@Service` and `@Repository` beans. You MUST use `@MockBean` to mock the dependencies of the controller.
+@Service
+public class OrderService {
+    // ⚠️ TRAP: The prototype is injected ONCE when OrderService is instantiated at startup!
+    // Every subsequent request and concurrent thread shares this IDENTICAL instance!
+    private final UserSessionContext sessionContext;
 
-### `@DataJpaTest` Uses Embedded H2 by Default
-Even if your `application.yml` points to PostgreSQL, `@DataJpaTest` will attempt to auto-configure an in-memory H2 database. If you don't have H2 in your POM, the test crashes.
-**Solution:** To test against your real DB (or Testcontainers), use `@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)`.
+    public OrderService(UserSessionContext sessionContext) {
+        this.sessionContext = sessionContext;
+    }
 
----
-
-## 🔝 Top 50 Spring Boot Interview Questions
-
-<details>
-<summary><b>1. What is the difference between Spring and Spring Boot?</b></summary>
-Spring is a dependency injection framework providing core AOP, transaction, and web MVC support. It requires massive XML/Java configuration. Spring Boot is an extension that provides auto-configuration, starter POMs, embedded servers, and opinionated defaults to get apps running quickly.
-</details>
-
-<details>
-<summary><b>2. How does Spring Boot Auto-Configuration work?</b></summary>
-It works via the `@EnableAutoConfiguration` annotation. Spring uses `SpringFactoriesLoader` to look for `META-INF/spring.factories` (or `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` in Boot 3.x). It loads configuration classes and applies them based on `@Conditional` annotations (e.g., `@ConditionalOnClass`, `@ConditionalOnMissingBean`).
-</details>
-
-<details>
-<summary><b>3. What are Spring Boot Starters?</b></summary>
-They are dependency descriptors you include in your application to get a curated list of dependencies. For example, `spring-boot-starter-web` pulls in Spring MVC, Jackson, and embedded Tomcat.
-</details>
-
-<details>
-<summary><b>4. What is the difference between `@Component`, `@Service`, `@Repository`, and `@Controller`?</b></summary>
-`@Component` is the generic stereotype. The others are specializations. `@Repository` translates persistence exceptions into Spring's DataAccessException. `@Controller` is meant for web endpoints. `@Service` currently has no additional behavior but serves as a marker for the business layer.
-</details>
-
-<details>
-<summary><b>5. Explain the Spring Bean Lifecycle.</b></summary>
-Instantiation -> Populate Properties (DI) -> `BeanNameAware` -> `BeanFactoryAware` -> `ApplicationContextAware` -> `BeanPostProcessor.postProcessBeforeInitialization` -> `@PostConstruct` / `InitializingBean.afterPropertiesSet` -> Custom init method -> `BeanPostProcessor.postProcessAfterInitialization` -> Bean is Ready for Use -> `@PreDestroy` / `DisposableBean.destroy` -> Custom destroy method.
-</details>
-
-<details>
-<summary><b>6. What are the Bean Scopes in Spring?</b></summary>
-Singleton (default), Prototype, Request, Session, Application, Websocket.
-</details>
-
-<details>
-<summary><b>7. How do you resolve Circular Dependencies?</b></summary>
-By redesigning the architecture to remove the cycle, or by using `@Lazy` injection on one of the dependencies to inject a proxy instead of the fully initialized bean.
-</details>
-
-<details>
-<summary><b>8. What is the difference between `@Autowired` and `@Inject`?</b></summary>
-`@Autowired` is Spring-specific. `@Inject` is part of the Java CDI (Contexts and Dependency Injection) standard (JSR-330). They function identically in Spring.
-</details>
-
-<details>
-<summary><b>9. What is `@Qualifier` used for?</b></summary>
-When multiple beans of the same type exist in the context, `@Qualifier` specifies exactly which bean to inject by its name.
-</details>
-
-<details>
-<summary><b>10. Can you inject a bean into a static field?</b></summary>
-Not directly with `@Autowired` on the field. You must use `@Autowired` on a non-static setter method that sets the static field.
-</details>
-
-<details>
-<summary><b>11. What is Spring AOP? How does it differ from AspectJ?</b></summary>
-Spring AOP is proxy-based and only works on Spring-managed beans. It only supports method execution join points. AspectJ is a full-fledged AOP framework that modifies byte-code (weaving) and supports field interception, constructor interception, and works on non-Spring objects.
-</details>
-
-<details>
-<summary><b>12. Why doesn't `@Transactional` work on private methods?</b></summary>
-Because Spring AOP uses proxies (JDK dynamic or CGLIB). Proxies wrap the object and intercept public methods. They cannot intercept private methods.
-</details>
-
-<details>
-<summary><b>13. Explain the Self-Invocation Problem.</b></summary>
-When a method calls another method within the same class, the call is made on the `this` reference, bypassing the AOP proxy completely. Annotations like `@Transactional` on the second method will be ignored.
-</details>
-
-<details>
-<summary><b>14. What are the `@Transactional` Propagation types?</b></summary>
-`REQUIRED` (default), `REQUIRES_NEW`, `SUPPORTS`, `NOT_SUPPORTED`, `MANDATORY`, `NEVER`, `NESTED`.
-</details>
-
-<details>
-<summary><b>15. Does `@Transactional` rollback on checked exceptions?</b></summary>
-No. By default, it only rolls back on `RuntimeException` and `Error`. You must configure `rollbackFor = Exception.class` to include checked exceptions.
-</details>
-
-<details>
-<summary><b>16. How does `@RestController` differ from `@Controller`?</b></summary>
-`@RestController` is a meta-annotation composed of `@Controller` and `@ResponseBody`. It automatically serializes the return object to JSON/XML instead of resolving to a view template (like JSP/Thymeleaf).
-</details>
-
-<details>
-<summary><b>17. What is `@ControllerAdvice`?</b></summary>
-It is an interceptor that surrounds the logic in your Controllers. It is primarily used with `@ExceptionHandler` to provide global, centralized exception handling across the whole application.
-</details>
-
-<details>
-<summary><b>18. How do you handle exceptions thrown in a Filter?</b></summary>
-Exceptions in Filters occur before the DispatcherServlet, so `@ControllerAdvice` won't catch them. You must catch them in the filter and use a `HandlerExceptionResolver` to route them, or manually write to the `HttpServletResponse`.
-</details>
-
-<details>
-<summary><b>19. Explain Spring Security architecture.</b></summary>
-It revolves around a chain of `Filter`s (`FilterChainProxy`). Key components include `AuthenticationManager`, `ProviderManager`, `AuthenticationProvider`, `UserDetailsService`, and `SecurityContextHolder`.
-</details>
-
-<details>
-<summary><b>20. How is `SecurityContext` managed?</b></summary>
-By default, it is stored in a `ThreadLocal` using `SecurityContextHolder.setStrategyName(SecurityContextHolder.MODE_THREADLOCAL)`.
-</details>
-
-<details>
-<summary><b>21. How do you pass `SecurityContext` to `@Async` methods?</b></summary>
-Use `MODE_INHERITABLETHREADLOCAL`, or configure the `TaskExecutor` with a `DelegatingSecurityContextExecutor`.
-</details>
-
-<details>
-<summary><b>22. What is CSRF and how does Spring Boot handle it?</b></summary>
-Cross-Site Request Forgery. Spring Security enables it by default, expecting a CSRF token in state-changing requests (POST/PUT). In stateless JWT/API architectures, it is usually disabled.
-</details>
-
-<details>
-<summary><b>23. Spring Data JPA: Difference between `save()` and `saveAndFlush()`?</b></summary>
-`save()` schedules the entity for insertion/update in the persistence context. The actual SQL is fired at flush time (usually before commit). `saveAndFlush()` forces the SQL statement to execute immediately.
-</details>
-
-<details>
-<summary><b>24. What is the N+1 Select Problem?</b></summary>
-When loading a list of N entities and then iterating through them to access a lazy-loaded collection, JPA executes 1 query for the list, plus N extra queries for each collection.
-</details>
-
-<details>
-<summary><b>25. How do you fix N+1?</b></summary>
-Using `JOIN FETCH` in JPQL, or `@EntityGraph` to instruct Hibernate to eagerly fetch the relationship in a single SQL join.
-</details>
-
-<details>
-<summary><b>26. Difference between `FetchType.LAZY` and `EAGER`?</b></summary>
-`LAZY` means the relationship is replaced by a proxy and loaded only when first accessed. `EAGER` means it is loaded immediately with the parent entity.
-</details>
-
-<details>
-<summary><b>27. What is `LazyInitializationException`?</b></summary>
-Occurs when you try to access a `LAZY` collection on a detached entity (an entity outside an active Hibernate Session/Transaction).
-</details>
-
-<details>
-<summary><b>28. Why should you avoid `@Data` (Lombok) on JPA Entities?</b></summary>
-`@Data` generates `equals()`, `hashCode()`, and `toString()` that include all fields. This can trigger lazy loading, causing `LazyInitializationException` or infinite recursion with bidirectional relationships.
-</details>
-
-<details>
-<summary><b>29. What is Spring Boot Actuator?</b></summary>
-It provides production-ready features like health checks, metrics, thread dumps, and environment property exposure via HTTP endpoints (`/actuator/health`).
-</details>
-
-<details>
-<summary><b>30. How do you secure Actuator endpoints?</b></summary>
-By default, only `/health` and `/info` are exposed. Others are secured. Use Spring Security to restrict access to the `/actuator/**` paths.
-</details>
-
-<details>
-<summary><b>31. What are profiles in Spring Boot?</b></summary>
-Profiles allow you to segregate parts of your configuration and make it available only in certain environments (e.g., `dev`, `test`, `prod`).
-</details>
-
-<details>
-<summary><b>32. How do you configure properties in Spring Boot?</b></summary>
-Via `application.properties`/`yml`, command line arguments, environment variables, or `@PropertySource`.
-</details>
-
-<details>
-<summary><b>33. What is `@ConfigurationProperties`?</b></summary>
-A way to bind external configuration properties directly to strongly-typed Java POJOs, allowing validation and type safety.
-</details>
-
-<details>
-<summary><b>34. How do you schedule tasks in Spring Boot?</b></summary>
-Annotate the main class with `@EnableScheduling` and use `@Scheduled(cron="...")` or `fixedRate` on a method.
-</details>
-
-<details>
-<summary><b>35. Is `@Scheduled` thread-safe and concurrent?</b></summary>
-No. By default, Spring uses a single thread to execute all `@Scheduled` tasks. If one blocks, others wait. You must define a `TaskScheduler` pool.
-</details>
-
-<details>
-<summary><b>36. What is the difference between `@Mock` and `@MockBean`?</b></summary>
-`@Mock` is pure Mockito. `@MockBean` is a Spring Boot test annotation that injects the mock directly into the ApplicationContext, replacing any real bean.
-</details>
-
-<details>
-<summary><b>37. Why is `@SpringBootTest` slow?</b></summary>
-Because it bootstraps the entire application context. Use slicing annotations like `@WebMvcTest` or `@DataJpaTest` instead for faster tests.
-</details>
-
-<details>
-<summary><b>38. What does `@WebMvcTest` do?</b></summary>
-It configures only the Web MVC layer (Controllers, Filters, etc.) and ignores Services and Repositories. You must mock dependencies with `@MockBean`.
-</details>
-
-<details>
-<summary><b>39. How do you test asynchronous code in Spring?</b></summary>
-Use `Awaitility` to poll for completion, or return a `CompletableFuture` and use `.get()` in the test.
-</details>
-
-<details>
-<summary><b>40. What is an `EntityManager`?</b></summary>
-It is the JPA interface used to interact with the persistence context. In Spring, it is proxied and bound to the current thread's transaction.
-</details>
-
-<details>
-<summary><b>41. How does Spring Boot manage database migrations?</b></summary>
-By integrating with Flyway or Liquibase. If their dependencies are on the classpath and scripts are in standard locations (e.g., `db/migration`), Spring Boot runs them automatically on startup.
-</details>
-
-<details>
-<summary><b>42. What is HikariCP?</b></summary>
-The default, extremely fast, lightweight JDBC connection pool used by Spring Boot.
-</details>
-
-<details>
-<summary><b>43. How do you handle CORS in Spring Boot?</b></summary>
-Using the `@CrossOrigin` annotation on controllers, or by registering a `CorsFilter` bean globally.
-</details>
-
-<details>
-<summary><b>44. What happens if you return a `ResponseEntity` from a Controller?</b></summary>
-It allows you to fully configure the HTTP response, including the HTTP status code, headers, and the response body.
-</details>
-
-<details>
-<summary><b>45. What is the difference between `@PathVariable` and `@RequestParam`?</b></summary>
-`@PathVariable` extracts values from the URI path (e.g., `/users/1`). `@RequestParam` extracts values from query parameters (e.g., `/users?id=1`).
-</details>
-
-<details>
-<summary><b>46. Can you have multiple `@SpringBootApplication` annotations?</b></summary>
-No. It is intended to be used on a single main class. It encapsulates `@Configuration`, `@EnableAutoConfiguration`, and `@ComponentScan`.
-</details>
-
-<details>
-<summary><b>47. How do you map exceptions to HTTP status codes?</b></summary>
-Using `@ResponseStatus(HttpStatus.NOT_FOUND)` on the Exception class, or handling it in `@ControllerAdvice`.
-</details>
-
-<details>
-<summary><b>48. What is `RestTemplate` vs `WebClient`?</b></summary>
-`RestTemplate` is the old, synchronous HTTP client. `WebClient` is the modern, non-blocking, reactive HTTP client introduced in Spring WebFlux.
-</details>
-
-<details>
-<summary><b>49. How does Spring know which profile to load?</b></summary>
-It looks at the `spring.profiles.active` property in the environment, command line, or `application.properties`.
-</details>
-
-<details>
-<summary><b>50. What is `@Conditional`?</b></summary>
-An annotation used mostly in auto-configuration to register a bean only if a certain condition is met (e.g., a class is present, a property is set).
-</details>
+    public void process(String currentUserId) {
+        sessionContext.setUserId(currentUserId);
+        // Under concurrent load, Thread B overwrites Thread A's userId, corrupting customer data!
+    }
+}
+```
 
 ---
 
-## 🚫 20 Common Misconceptions
+### Approach 1: Method Injection via `@Lookup`
 
-1. **Misconception:** Spring Boot generates code behind the scenes.
-   **Reality:** It uses standard Java, reflection, and proxying. There is no code generation (unless using GraalVM AOT compilation in Boot 3).
-2. **Misconception:** `@Transactional` makes your method thread-safe.
-   **Reality:** It only provides ACID properties for the database transaction. Concurrent Java threads still share state.
-3. **Misconception:** `@Autowired` is the best way to inject dependencies.
-   **Reality:** Constructor injection is highly preferred. It allows `final` fields, prevents circular dependencies from hiding, and makes testing easier.
-4. **Misconception:** `@Async` runs in the background efficiently by default.
-   **Reality:** Without a configured Executor, it spawns a new unmanaged thread per request, leading to potential out-of-memory errors.
-5. **Misconception:** `@Component` and `@Service` behave differently.
-   **Reality:** Functionally, they are identical in the Spring container. `@Service` is purely a semantic marker.
-6. **Misconception:** `@Cacheable` caches based on the object reference.
-   **Reality:** It caches based on the method parameters using their `hashCode()` and `equals()`.
-7. **Misconception:** Hibernate saves data the moment you call `repo.save()`.
-   **Reality:** It stores it in the Persistence Context. The actual `INSERT/UPDATE` SQL is delayed until flush (usually end of transaction).
-8. **Misconception:** `@RestController` is secure by default.
-   **Reality:** Endpoints are completely open unless Spring Security is in the classpath and configured.
-9. **Misconception:** You can catch any exception globally with `@ControllerAdvice`.
-   **Reality:** Exceptions thrown in Filters or during the request mapping phase (before the DispatcherServlet delegates) will bypass it.
-10. **Misconception:** ApplicationContext is just a Map.
-    **Reality:** It's a complex factory interface with lifecycle management, environment abstraction, event publishing, and hierarchical contexts.
-11. **Misconception:** Spring Boot requires Tomcat.
-    **Reality:** You can swap it for Jetty, Undertow, or run reactive with Netty (WebFlux).
-12. **Misconception:** A bean with `@Scope("prototype")` injected into a singleton creates a new instance on every method call.
-    **Reality:** It is injected only once at startup. The singleton holds a single instance of the prototype.
-13. **Misconception:** `@Transactional(readOnly = true)` prevents modifications at the application level.
-    **Reality:** It sets an optimization flag. The database or JDBC driver handles the read-only enforcement.
-14. **Misconception:** The main thread waits for `@Async` methods to complete before shutting down.
-    **Reality:** If the Executor is not configured properly or shutdown hooks are missing, the JVM can terminate while async tasks are running.
-15. **Misconception:** `CascadeType.ALL` is safe to use everywhere.
-    **Reality:** On `@ManyToMany` relationships, it can cause catastrophic deletions of shared entities.
-16. **Misconception:** A new Transaction is always started with `@Transactional`.
-    **Reality:** By default (`REQUIRED`), it joins an existing transaction if one is present on the calling thread.
-17. **Misconception:** SecurityContextHolder is globally accessible across all threads.
-    **Reality:** It uses `ThreadLocal` and is isolated to the specific HTTP request thread.
-18. **Misconception:** `@Value` always parses strings.
-    **Reality:** It can parse lists, maps, booleans, and run complex SpEL logic.
-19. **Misconception:** `@DataJpaTest` tests against your actual configured database.
-    **Reality:** It swaps it for an embedded in-memory database (H2/Derby) by default.
-20. **Misconception:** OpenSessionInView is a good pattern.
-    **Reality:** It's enabled by default in Boot but is an anti-pattern that keeps database connections open during the entire view-rendering phase (or JSON serialization), heavily degrading performance under load.
+#### Scenario
+A singleton bean needs a fresh prototype bean instance on every method invocation without polluting the class with `ApplicationContext` dependencies.
+
+#### Use-Case
+Clean object-oriented code where Spring dynamically overrides an abstract or stub method using CGLIB bytecode generation.
+
+#### Benefits Over Others
+- **Clean Domain Code:** No references to Spring container interfaces (`BeanFactory`, `ApplicationContext`).
+- **Framework Managed:** Spring generates a CGLIB subclass at runtime that queries the `BeanFactory` for a fresh prototype bean on each invocation.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.di.lookup;
+
+import org.springframework.beans.factory.annotation.Lookup;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+
+@Component
+@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
+class StatefulWorkerTask {
+    private String correlationId;
+    public void execute(String id) {
+        this.correlationId = id;
+        // Stateful task logic...
+    }
+}
+
+@Service
+public abstract class DispatcherService {
+
+    public void dispatch(String customerId) {
+        // Invoking getWorker() dynamically delegates to Spring's CGLIB BeanFactory lookup
+        StatefulWorkerTask worker = getWorkerTask();
+        worker.execute(customerId);
+    }
+
+    // Spring CGLIB overrides this method to return a brand new prototype instance every time!
+    @Lookup
+    public abstract StatefulWorkerTask getWorkerTask();
+}
+```
 
 ---
 
-## 📝 Summary & Key Takeaways
+### Approach 2: Programmatic Bean Retrieval via `ObjectProvider<T>`
 
-1. **Beware the Proxy:** Understand that Spring heavily relies on AOP Proxies. Private methods, self-invocations, and final classes break proxy behaviors.
-2. **Understand ThreadBound Contexts:** Transactions and Security rely on `ThreadLocal`. Moving execution to another thread (`@Async` or reactive streams) loses this context.
-3. **Database Illusions:** JPA is an abstraction. Underneath, N+1 issues, batching behaviors, and flush modes dictate performance. The persistence context delays queries.
-4. **Defaults are Dangerous:** Unconfigured `@Async` thread pools, OpenSessionInView, and H2 testing fallbacks can ruin production deployments.
+#### Scenario
+Singleton services that need on-demand creation of prototype beans with optional construction parameters or streaming support.
 
-## ❓ Practice Questions
+#### Use-Case
+The modern (Spring 4.3+) standard for programmatic, type-safe prototype resolution.
 
-1. Write a code snippet demonstrating the self-invocation problem with `@Transactional` and fix it using self-injection.
-2. Design a `@RestController` that safely maintains a running counter of requests in a thread-safe manner.
-3. Analyze a failing test where `@SpringBootTest` takes 10 minutes to run, and refactor it to run in 500ms using `@ExtendWith(MockitoExtension.class)`.
+#### Benefits Over Others
+- **Supports Concrete Classes:** Does not require abstract classes or methods.
+- **Factory Parameterization:** Supports passing dynamic arguments to prototype constructors via `provider.getObject(arg1, arg2)`.
 
-*End of Module 12*
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.di.objectprovider;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+
+@Component
+@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
+class ProcessingContext {
+    private final String tenantId;
+    public ProcessingContext(String tenantId) { this.tenantId = tenantId; }
+    public String getTenantId() { return tenantId; }
+}
+
+@Service
+@RequiredArgsConstructor
+public class MultiTenantJobCoordinator {
+
+    // ObjectProvider retrieves a new instance on demand
+    private final ObjectProvider<ProcessingContext> contextProvider;
+
+    public void executeJob(String tenantId) {
+        // Supplies dynamic constructor arguments to the prototype bean
+        ProcessingContext context = contextProvider.getObject(tenantId);
+        // Execute tenant-isolated work safely...
+    }
+}
+```
+
+---
+
+### Approach 3: Target Class Scoped Proxies (`ScopedProxyMode.TARGET_CLASS`)
+
+#### Scenario
+Web applications injecting request-scoped or session-scoped beans (e.g., active user identity, shopping cart) directly into singleton controllers or services.
+
+#### Use-Case
+Transparent dependency injection where the singleton holds a stable CGLIB proxy reference, and the proxy dynamically routes method calls to the active thread's request or session context.
+
+#### Benefits Over Others
+- **Standard Direct Field Injection:** The singleton simply calls `userSession.getUserId()` as if it were a normal field.
+- **Thread & Context Isolation:** The proxy queries `RequestContextHolder` underneath, ensuring each thread accesses its own scoped instance.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.di.scopedproxy;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.context.annotation.Scope;
+import org.springframework.context.annotation.ScopedProxyMode;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+import org.springframework.web.context.WebApplicationContext;
+
+@Component
+@Scope(value = WebApplicationContext.SCOPE_REQUEST, proxyMode = ScopedProxyMode.TARGET_CLASS)
+@Getter
+@Setter
+class RequestUserContext {
+    private String currentUserId;
+    private String jwtToken;
+}
+
+@Service
+public class BillingService {
+
+    // Safe to inject into Singleton! Spring injects a CGLIB scoped proxy!
+    private final RequestUserContext requestUserContext;
+
+    public BillingService(RequestUserContext requestUserContext) {
+        this.requestUserContext = requestUserContext;
+    }
+
+    public void processPayment() {
+        // The proxy delegates to the current thread's HTTP request context
+        String userId = requestUserContext.getCurrentUserId();
+        // Execute billing for current user...
+    }
+}
+```
+
+---
+
+### Approach 4: Dedicated Factory Bean Pattern
+
+#### Scenario
+Complex prototype initialization requiring database queries, dynamic builder construction, or external client authentication before returning the instance.
+
+#### Use-Case
+Complex domain objects whose creation involves complex lifecycle steps outside standard Spring XML or annotation scopes.
+
+#### Benefits Over Others
+- **Complete Encapsulation:** Isolates instantiation and resource configuration inside a dedicated factory component.
+- **Deterministic Teardown:** Can manage destruction lifecycle callbacks explicitly.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.di.factory;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
+public class SftpConnectionClient {
+    private final String sessionToken;
+    public SftpConnectionClient(String sessionToken) { this.sessionToken = sessionToken; }
+    public void upload(byte[] data) {}
+}
+
+@Component
+public class SftpClientFactory {
+    public SftpConnectionClient createNewClient(String userToken) {
+        // Perform handshakes, allocate sockets
+        return new SftpConnectionClient(userToken);
+    }
+}
+
+@Component
+@RequiredArgsConstructor
+public class DataExportService {
+    private final SftpClientFactory clientFactory;
+
+    public void exportData(String userToken, byte[] payload) {
+        SftpConnectionClient client = clientFactory.createNewClient(userToken);
+        client.upload(payload);
+    }
+}
+```
+
+---
+
+## 3. Transactional Boundary & Rollback Traps
+
+### The Trap: Checked Exceptions Committing Dirty State Silently
+
+#### The Failure Scenario
+A developer marks a financial transfer method with `@Transactional`. During execution, an `IOException` or custom `PaymentDeclinedException` (extending `java.lang.Exception`) is thrown. 
+
+```java
+// ❌ THE CHECKED EXCEPTION TRAP
+@Service
+public class BankingService {
+
+    @Autowired
+    private AccountRepository accountRepository;
+
+    @Transactional // ⚠️ TRAP: By default, Spring ONLY rolls back on RuntimeException and Error!
+    public void transferFunds(Long fromId, Long toId, BigDecimal amount) throws InsufficientFundsException {
+        Account from = accountRepository.findById(fromId).orElseThrow();
+        from.debit(amount);
+        accountRepository.save(from);
+
+        if (someExternalCheckFails()) {
+            // Checked exception thrown!
+            // ⚠️ SPRING COMMITS THE TRANSACTION! The debit is permanently written to the database!
+            throw new InsufficientFundsException("Transfer blocked by compliance");
+        }
+    }
+}
+```
+
+#### Why It Fails Internally
+Spring's `TransactionAspectSupport` implements default rollback rules dating back to EJB container specifications:
+- `RuntimeException` & `Error` -> **ROLLBACK**
+- Checked `Exception` -> **COMMIT** (assumed to be a recoverable business outcome)
+
+---
+
+### Approach 1: Explicit Declarative Rollback (`rollbackFor = Exception.class`)
+
+#### Scenario
+Standard enterprise services using declarative annotations where all unhandled exceptions must trigger an immediate rollback.
+
+#### Use-Case
+Default production best practice for almost every enterprise `@Transactional` annotation.
+
+#### Benefits Over Others
+- **Universal Safety:** Ensures any thrown exception (checked or unchecked) marks the database transaction for immediate rollback.
+- **Zero Boilerplate:** Single configuration property.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.tx.solution1;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class SecureBankingService {
+
+    @Transactional(rollbackFor = Exception.class) // Ensures rollback for ALL checked and unchecked exceptions
+    public void executeTransfer(Long fromId, Long toId, double amount) throws Exception {
+        // Database mutations...
+        if (amount > 10000) {
+            throw new Exception("Compliance review required"); // Transaction ROLLS BACK cleanly!
+        }
+    }
+}
+```
+
+---
+
+### Approach 2: Programmatic Rollback via `TransactionAspectSupport`
+
+#### Scenario
+Methods that catch checked exceptions to log audit events, notify telemetry systems, or construct a custom response payload, while ensuring the database transaction is marked for rollback.
+
+#### Use-Case
+Suppressing exceptions from escaping the service layer while preventing dirty state from committing to the database.
+
+#### Benefits Over Others
+- **Safe Exception Absorption:** The method can catch the exception, return an HTTP error DTO, and still guarantee that no partial database writes are committed.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.tx.solution2;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+
+import java.io.IOException;
+
+@Service
+@Slf4j
+public class SuppressedRollbackService {
+
+    @Transactional
+    public boolean performImport(byte[] data) {
+        try {
+            // Write batch records...
+            readNetworkBatch(data);
+            return true;
+        } catch (IOException e) {
+            log.error("Network IO failed during batch import, marking transaction rollback-only", e);
+            // Explicitly notify the Spring transaction interceptor to rollback
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            return false; // Return failure cleanly without bubbling exception to client
+        }
+    }
+
+    private void readNetworkBatch(byte[] data) throws IOException {
+        throw new IOException("Connection dropped");
+    }
+}
+```
+
+---
+
+### Approach 3: Custom Domain Unchecked Exception Wrapping
+
+#### Scenario
+Modern Clean Architecture / Domain-Driven Design (DDD) where domain business exceptions extend `RuntimeException`.
+
+#### Use-Case
+Eliminating checked exceptions from domain service method signatures entirely, adhering to modern Java best practices.
+
+#### Benefits Over Others
+- **Clean Method Signatures:** No ugly `throws Exception` clauses polluting code.
+- **Automatic Spring Rollback:** Natively triggers Spring's default rollback mechanism.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.tx.solution3;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+// Domain exception extends RuntimeException
+class InsufficientLiquidityException extends RuntimeException {
+    public InsufficientLiquidityException(String message) { super(message); }
+}
+
+@Service
+public class DomainTransferService {
+
+    @Transactional // Rolls back automatically because InsufficientLiquidityException is unchecked!
+    public void executeDebit(Long accountId, double amount) {
+        if (amount > 500) {
+            throw new InsufficientLiquidityException("Requested debit exceeds overdraft limits");
+        }
+    }
+}
+```
+
+---
+
+### Approach 4: Programmatic `TransactionTemplate` with Custom Callback
+
+#### Scenario
+Microservices needing fine-grained transaction boundaries without relying on method-level annotations.
+
+#### Use-Case
+Complex batch workflows where transactions are started, committed, or rolled back iteratively within loops.
+
+#### Benefits Over Others
+- **Loop-Level Transactions:** Commit or rollback individual records inside a loop without creating separate classes or methods.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.tx.solution4;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class BatchItemProcessor {
+
+    private final TransactionTemplate transactionTemplate;
+
+    public void processBatch(List<String> items) {
+        for (String item : items) {
+            // Each iteration executes inside its own independent, isolated physical transaction
+            transactionTemplate.execute(status -> {
+                try {
+                    persistItem(item);
+                    return true;
+                } catch (Exception e) {
+                    log.error("Failed item '{}', rolling back only this record", item, e);
+                    status.setRollbackOnly();
+                    return false;
+                }
+            });
+        }
+    }
+
+    private void persistItem(String item) {}
+}
+```
+
+---
+
+## 4. JPA & Persistence Context Traps
+
+### The Trap: `LazyInitializationException` Beyond the Session Boundary
+
+#### The Failure Scenario
+A controller calls a `@Transactional` service to load an `Author` entity. The service returns the entity, the transaction commits, and Hibernate closes the `EntityManager`. When Jackson serializes `author.getBooks()` in the web layer, Hibernate throws `LazyInitializationException: could not initialize proxy - no Session`.
+
+```
+Service Layer (Active Session)         Web / Controller Layer (Session Closed)
+┌───────────────────────────────┐     ┌───────────────────────────────────────┐
+│ @Transactional                │     │ Jackson ObjectMapper                  │
+│ Author author = repo.get(1);  │ ──▶ │ author.getBooks()                     │
+│ (Books collection is a proxy) │     │ ⚠️ LazyInitializationException:       │
+│ Transaction commits & closes! │     │ "could not initialize proxy -         │
+└───────────────────────────────┘     │  no Session"                          │
+                                      └───────────────────────────────────────┘
+```
+
+> [!CAUTION]
+> **Never enable `spring.jpa.open-in-view=true` (OSIV) as a workaround!** OSIV keeps database connections open during the entire HTTP request lifecycle, including view rendering and network I/O, quickly exhausting the HikariCP connection pool under moderate traffic.
+
+---
+
+### Approach 1: JPQL Explicit `JOIN FETCH`
+
+#### Scenario
+Known read workflows where the parent entity and its child collection are always required together.
+
+#### Use-Case
+Standard repository query methods loading parent and child entities in a single SQL query.
+
+#### Benefits Over Others
+- **Guaranteed Single Query:** Fetches both entities in a single `JOIN` query, eliminating the N+1 select problem.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.jpa.joinfetch;
+
+import jakarta.persistence.*;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.Set;
+
+@Entity
+@Table(name = "authors")
+class Author {
+    @Id @GeneratedValue private Long id;
+    private String name;
+
+    @OneToMany(mappedBy = "author", fetch = FetchType.LAZY)
+    private Set<Book> books;
+}
+
+@Entity
+@Table(name = "books")
+class Book {
+    @Id @GeneratedValue private Long id;
+    private String title;
+    @ManyToOne(fetch = FetchType.LAZY) private Author author;
+}
+
+interface AuthorRepository extends JpaRepository<Author, Long> {
+
+    // Eagerly fetches books in the initial SELECT query via SQL JOIN
+    @Query("SELECT DISTINCT a FROM Author a LEFT JOIN FETCH a.books WHERE a.id = :id")
+    Author findByIdWithBooksEagerly(@Param("id") Long id);
+}
+```
+
+---
+
+### Approach 2: Dynamic JPA `@EntityGraph`
+
+#### Scenario
+A repository method where different use cases require different fetch plans (e.g., Use Case A needs `Author.books`, while Use Case B needs `Author.books` and `Author.publisher`).
+
+#### Use-Case
+Declarative, dynamic fetching without rewriting queries.
+
+#### Benefits Over Others
+- **Composable Fetch Plans:** Keeps repository query definitions clean.
+- **Cartesian Product Defense:** Can be configured to fetch subgraphs without hand-crafted SQL strings.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.jpa.entitygraph;
+
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+
+interface EntityGraphAuthorRepository extends JpaRepository<Author, Long> {
+
+    // Dynamically overrides FetchType.LAZY for the 'books' attribute
+    @EntityGraph(attributePaths = {"books"})
+    Optional<Author> findDetailedById(Long id);
+}
+```
+
+---
+
+### Approach 3: DTO Record Constructor Projection (Zero Entity Overhead)
+
+#### Scenario
+Read-only queries serving REST APIs or dashboards where Hibernate entity dirty tracking and proxy management add unnecessary overhead.
+
+#### Use-Case
+High-performance read queries. This is the **most scalable, production-recommended solution**.
+
+#### Benefits Over Others
+- **Zero Hibernate Proxies:** Bypasses entities and proxies entirely; maps SQL columns directly to Java record constructors.
+- **Zero `LazyInitializationException` Risk:** Plain Java records have no persistence session dependency.
+- **Minimal Memory Footprint:** Bypasses Hibernate first-level cache dirty-checking snapshots.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.jpa.dto;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.List;
+
+public record AuthorSummaryDto(Long authorId, String authorName, Long totalBooks) {}
+
+interface DtoAuthorRepository extends JpaRepository<Author, Long> {
+
+    @Query("""
+        SELECT new com.example.traps.jpa.dto.AuthorSummaryDto(a.id, a.name, COUNT(b.id))
+        FROM Author a LEFT JOIN a.books b
+        WHERE a.id = :id
+        GROUP BY a.id, a.name
+    """)
+    AuthorSummaryDto findSummaryById(@Param("id") Long id);
+}
+```
+
+---
+
+### Approach 4: Programmatic `TransactionTemplate` Stack-Confined Loading
+
+#### Scenario
+Use cases where legacy service boundaries cannot be modified, but a specific controller or worker needs to load a lazy collection safely.
+
+#### Use-Case
+Initializing lazy collections within an explicit transaction boundary.
+
+#### Benefits Over Others
+- **Explicit Scope:** Isolates the database connection to the exact block of code that accesses the lazy relationship.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.jpa.template;
+
+import lombok.RequiredArgsConstructor;
+import org.hibernate.Hibernate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+@Service
+@RequiredArgsConstructor
+public class LazyLoadingCoordinator {
+
+    private final AuthorRepository authorRepository;
+    private final TransactionTemplate transactionTemplate;
+
+    public int getBookCountSafely(Long authorId) {
+        return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
+            Author author = authorRepository.findById(authorId).orElseThrow();
+            // Force initialization of lazy collection while the Hibernate session is active
+            Hibernate.initialize(author.getBooks());
+            return author.getBooks().size();
+        }));
+    }
+}
+```
+
+---
+
+## 5. Concurrency, Async & ThreadContext Traps
+
+### The Trap: `SimpleAsyncTaskExecutor` Memory Starvation & ThreadContext Loss
+
+#### The Failure Scenario
+A developer adds `@EnableAsync` without defining a custom `TaskExecutor` bean. Under peak load, Spring defaults to `SimpleAsyncTaskExecutor`. This executor **does not pool threads**; it spawns an unbounded new OS thread for every single asynchronous task.
+
+Furthermore, context stored in `ThreadLocal` (e.g., Spring Security's `SecurityContext`, Logback MDC trace IDs) is completely lost in the async thread.
+
+```
+Request Thread (Thread-1)                    Async Worker Thread (Thread-2)
+┌──────────────────────────────────────┐     ┌──────────────────────────────────────┐
+│ ThreadLocal Variables:               │     │ ThreadLocal Variables:               │
+│ - SecurityContext: User="Alice"      │ ──X │ - SecurityContext: NULL (Anonymous!) │
+│ - MDC: TraceId="TR-9821"             │     │ - MDC: NULL (Logs untraceable!)      │
+└──────────────────────────────────────┘     └──────────────────────────────────────┘
+```
+
+---
+
+### Approach 1: Bounded `ThreadPoolTaskExecutor` with `TaskDecorator`
+
+#### Scenario
+Production applications processing asynchronous tasks on platform worker threads while propagating MDC tracing IDs and tenant identifiers.
+
+#### Use-Case
+Standard production setup for `@Async` in Spring Boot 3.x.
+
+#### Benefits Over Others
+- **Thread Pool Protection:** Bounded pool size and queue capacity prevent thread exhaustion and out-of-memory errors.
+- **Context Preservation:** Safely captures and restores `ThreadLocal` state across thread boundaries.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.async.pool;
+
+import org.slf4j.MDC;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskDecorator;
+import org.springframework.scheduling.annotation.AsyncConfigurer;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
+
+@Configuration
+@EnableAsync
+public class SafeAsyncPoolConfiguration implements AsyncConfigurer {
+
+    @Bean(name = "applicationTaskExecutor")
+    @Override
+    public Executor getAsyncExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(8);
+        executor.setMaxPoolSize(32);
+        executor.setQueueCapacity(1000);
+        executor.setThreadNamePrefix("app-async-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        // Propagate MDC logging context across thread boundaries
+        executor.setTaskDecorator(new MdcContextPropagatingDecorator());
+        executor.initialize();
+        return executor;
+    }
+}
+
+class MdcContextPropagatingDecorator implements TaskDecorator {
+    @Override
+    public Runnable decorate(Runnable runnable) {
+        // Capture context from calling thread
+        Map<String, String> contextMap = MDC.getCopyOfContextMap();
+        return () -> {
+            try {
+                // Restore context on worker thread
+                if (contextMap != null) MDC.setContextMap(contextMap);
+                runnable.run();
+            } finally {
+                // Always clean up worker thread state
+                MDC.clear();
+            }
+        };
+    }
+}
+```
+
+---
+
+### Approach 2: Java 21 Virtual Threads (`VirtualThreadTaskExecutor`)
+
+#### Scenario
+High-concurrency microservices performing high-volume I/O operations (HTTP requests, database calls, file transfers) in background tasks.
+
+#### Use-Case
+Modern Spring Boot 3.2+ applications running on Java 21+.
+
+#### Benefits Over Others
+- **Near-Infinite Concurrency:** Spawns millions of lightweight virtual threads with minimal memory overhead.
+- **Zero Pool Tuning:** Eliminates complex thread pool sizing and queue capacity configuration.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.async.virtual;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.web.embedded.tomcat.TomcatProtocolHandlerCustomizer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.core.task.support.TaskExecutorAdapter;
+
+import java.util.concurrent.Executors;
+
+@Configuration
+public class VirtualThreadAsyncConfiguration {
+
+    @Bean(name = "taskExecutor")
+    public AsyncTaskExecutor virtualThreadTaskExecutor() {
+        // Leverages Java 21 Virtual Threads for all @Async tasks
+        return new TaskExecutorAdapter(Executors.newVirtualThreadPerTaskExecutor());
+    }
+
+    @Bean
+    public TomcatProtocolHandlerCustomizer<?> protocolHandlerVirtualThreadCustomizer() {
+        // Leverages Virtual Threads for Tomcat HTTP connector requests
+        return protocolHandler -> protocolHandler.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+    }
+}
+```
+
+---
+
+### Approach 3: Micrometer Context Propagation Pipeline
+
+#### Scenario
+Distributed microservices utilizing OpenTelemetry, distributed tracing, and reactive pipelines.
+
+#### Use-Case
+The official Spring Boot 3.x mechanism for propagating observability and security context across threads.
+
+#### Benefits Over Others
+- **Unified Standard:** Propagates tracing, metrics, and security context uniformly across both imperative and reactive threads.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.async.micrometer;
+
+import io.micrometer.context.ContextRegistry;
+import io.micrometer.context.ContextSnapshot;
+import jakarta.annotation.PostConstruct;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.concurrent.Executor;
+
+@Configuration
+public class MicrometerContextConfiguration {
+
+    @PostConstruct
+    public void registerContextAccessors() {
+        // Register SecurityContext propagation with Micrometer
+        ContextRegistry.getInstance().registerThreadLocalAccessor(
+                "security-context",
+                SecurityContextHolder::getContext,
+                SecurityContextHolder::setContext,
+                SecurityContextHolder::clearContext
+        );
+    }
+
+    public static Runnable wrapWithContext(Runnable task) {
+        // Captures all registered ThreadLocals and restores them on execution
+        return ContextSnapshot.captureAll().wrap(task);
+    }
+}
+```
+
+---
+
+## 6. Web Layer & Servlet Filter Traps
+
+### The Trap: Servlet Filter Exceptions Bypassing `@RestControllerAdvice`
+
+#### The Failure Scenario
+A developer builds an authentication filter (e.g., `JwtAuthenticationFilter`) that validates bearer tokens. When a malformed token is received, the filter throws an `InvalidTokenException`. 
+
+The developer has a `@RestControllerAdvice` configured to handle `InvalidTokenException` and return a clean JSON error response. However, the client receives an ugly default Tomcat 500 HTML error page instead.
+
+#### Why It Fails Internally
+`@RestControllerAdvice` is integrated into Spring's `DispatcherServlet`. Servlet `Filter`s reside in the Servlet Container chain **outside and before** the `DispatcherServlet`. When an exception is thrown in a Filter, the `DispatcherServlet` is never reached.
+
+```
+Client HTTP Request
+       │
+       ▼
+┌──────────────────────────────────────────────┐
+│  Servlet Container Filter Chain               │
+│  ┌────────────────────────────────────────┐  │
+│  │ JwtAuthenticationFilter                │  │
+│  │ ⚠️ Throws InvalidTokenException!       │  │
+│  └──────────────────┬─────────────────────┘  │
+└─────────────────────┼────────────────────────┘
+                      │ ❌ Never reaches DispatcherServlet!
+                      ▼
+┌──────────────────────────────────────────────┐
+│  Spring DispatcherServlet                    │
+│  (Wraps @RestControllerAdvice)               │
+└──────────────────────────────────────────────┘
+```
+
+---
+
+### Approach 1: Delegating to `HandlerExceptionResolver` Inside Filter
+
+#### Scenario
+Propagating filter exceptions into the standard Spring MVC `@RestControllerAdvice` exception pipeline.
+
+#### Use-Case
+The cleanest, most idiomatic solution for handling filter errors in Spring Boot.
+
+#### Benefits Over Others
+- **Centralized Exception Handling:** Reuses your existing `@RestControllerAdvice` and `@ExceptionHandler` methods for both filter and controller errors.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.filter.solution1;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+
+import java.io.IOException;
+
+@Component
+@Slf4j
+public class SafeJwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private final HandlerExceptionResolver resolver;
+
+    // Inject Spring's primary HandlerExceptionResolver
+    public SafeJwtAuthenticationFilter(@Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver) {
+        this.resolver = resolver;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        try {
+            validateBearerToken(request);
+            filterChain.doFilter(request, response);
+        } catch (Exception ex) {
+            log.warn("Filter encountered error, delegating to DispatcherServlet HandlerExceptionResolver", ex);
+            // Forward the exception into Spring's @RestControllerAdvice pipeline!
+            resolver.resolveException(request, response, null, ex);
+        }
+    }
+
+    private void validateBearerToken(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.equals("Bearer MALFORMED")) {
+            throw new IllegalArgumentException("Invalid JWT signature");
+        }
+    }
+}
+```
+
+---
+
+### Approach 2: Direct RFC 7807 `ProblemDetail` Writing via `ObjectMapper`
+
+#### Scenario
+Lightweight security filters or edge gateways that need to reject invalid requests immediately without invoking the Spring MVC dispatcher pipeline.
+
+#### Use-Case
+High-security firewalls, rate limiters, and IP blocking filters.
+
+#### Benefits Over Others
+- **Zero MVC Dependency:** Generates the RFC 7807 JSON response directly from the filter.
+- **Fail-Fast Efficiency:** Aborts request processing immediately at the container edge.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.filter.solution2;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+import java.net.URI;
+import java.time.Instant;
+
+@Component
+public class DirectErrorWritingFilter extends OncePerRequestFilter {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws IOException {
+        String apiKey = request.getHeader("X-API-KEY");
+
+        if (apiKey == null || !apiKey.equals("SECRET-KEY")) {
+            // Construct RFC 7807 Problem Detail response directly
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                    HttpStatus.UNAUTHORIZED,
+                    "Missing or invalid API authorization key."
+            );
+            problem.setTitle("Unauthorized Access");
+            problem.setType(URI.create("https://api.example.com/errors/unauthorized"));
+            problem.setProperty("timestamp", Instant.now());
+
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+            response.getWriter().write(objectMapper.writeValueAsString(problem));
+            return; // Terminate filter chain execution
+        }
+
+        try {
+            filterChain.doFilter(request, response);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+---
+
+### Approach 3: Forwarding to Container Error Endpoint via `RequestDispatcher`
+
+#### Scenario
+Applications that already have a dedicated error controller mapping `/error` to handle container-level errors.
+
+#### Use-Case
+Reusing Spring Boot's built-in `BasicErrorController` for filter exceptions.
+
+#### Benefits Over Others
+- **Standard Servlet Compliance:** Relies entirely on the standard Java Servlet specification request dispatch mechanism.
+
+#### Production-Grade Code Example
+
+```java
+package com.example.traps.filter.solution3;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.RequestDispatcher;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+public class RequestDispatcherForwardingFilter extends OncePerRequestFilter {
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws IOException {
+        try {
+            filterChain.doFilter(request, response);
+        } catch (Exception ex) {
+            // Attach exception to standard request attributes
+            request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, ex);
+            request.setAttribute(RequestDispatcher.ERROR_MESSAGE, ex.getMessage());
+
+            // Forward to Spring Boot's standard /error controller
+            request.getRequestDispatcher("/error").forward(request, response);
+        }
+    }
+}
+```
+
+---
+
+## 7. Comprehensive Trap Matrix & Senior Engineer Cheat Sheet
+
+| Category | The Trap | Root Cause | Primary Fix Approach | Alternative Fix Approach |
+|---|---|---|---|---|
+| **AOP** | Self-invocation ignores `@Transactional` | Calling `this.method()` bypasses CGLIB proxy wrapper | Separate into dedicated collaborator service | Self-injection via `@Lazy ObjectProvider<T>` |
+| **AOP** | `@Async` runs synchronously on caller thread | Calling `this.asyncMethod()` bypasses AOP thread submission | Refactor method to external collaborator bean | Programmatic `TaskExecutor.execute()` |
+| **DI** | Prototype bean behaves as a singleton | Injected once into singleton constructor at startup | Method injection via `@Lookup` | Programmatic retrieval via `ObjectProvider<T>` |
+| **Tx** | Checked exceptions commit dirty state | Spring transactions only roll back on unchecked exceptions by default | Add `rollbackFor = Exception.class` | Wrap in domain `RuntimeException` |
+| **JPA** | `LazyInitializationException` in web layer | Hibernate session closes at the service transaction boundary | DTO Record Constructor Projection | Repository `JOIN FETCH` / `@EntityGraph` |
+| **Async** | Unbounded threads cause OutOfMemoryError | `@EnableAsync` defaults to `SimpleAsyncTaskExecutor` | Configure bounded `ThreadPoolTaskExecutor` | Java 21 Virtual Threads |
+| **Web** | Filter exceptions return raw HTML 500 | Filters sit outside `DispatcherServlet` and `@RestControllerAdvice` | Delegate to `HandlerExceptionResolver` in filter | Write RFC 7807 `ProblemDetail` via `ObjectMapper` |
+| **Sec** | Security context lost in async worker threads | SecurityContext is bound to caller's `ThreadLocal` | Configure `DelegatingSecurityContextAsyncTaskExecutor` | Micrometer `ContextSnapshot.wrap()` |
+| **JPA** | Batch inserts disabled silently | `@GeneratedValue(strategy = GenerationType.IDENTITY)` forces immediate insert to get ID | Use `GenerationType.SEQUENCE` | Spring `JdbcClient.batch()` |
+| **Web** | Memory exhaustion on large file uploads | Calling `file.getBytes()` loads entire binary into heap | Stream directly via NIO or `transferTo(Path)` | Asynchronous `StreamingResponseBody` |

@@ -581,3 +581,722 @@ This architecture is why blocking a thread is fatal. If the Netty thread is busy
 3. What is BlockHound, and why is it critical in a Spring WebFlux project?
 4. A junior developer added a call to a legacy SOAP service using `java.net.HttpURLConnection` inside a WebFlux controller. What happens to the application under load? How do you correctly isolate this legacy call?
 5. Why does `@Transactional` work differently in WebFlux compared to Spring MVC? How is the transaction context passed if `ThreadLocal` cannot be used?
+
+
+---
+
+## 9. Hot vs Cold Publishers
+
+Understanding the difference between hot and cold publishers is fundamental to mastering Project Reactor and debugging subtle subscription bugs.
+
+### 9.1 Cold Publishers — Each Subscriber Gets Its Own Stream
+
+A **cold** publisher is like a movie on demand: every subscriber gets the full sequence from the beginning, independently of other subscribers.
+
+```java
+package com.example.ecommerce.reactive;
+
+import reactor.core.publisher.Flux;
+import java.time.Duration;
+
+public class ColdPublisherExample {
+
+    public void demonstrateCold() {
+        // Flux.just() is COLD — each subscription gets a fresh iteration
+        Flux<Integer> coldFlux = Flux.just(1, 2, 3, 4, 5);
+
+        // First subscriber gets 1, 2, 3, 4, 5
+        coldFlux.subscribe(val -> System.out.println("Subscriber 1: " + val));
+
+        // Second subscriber ALSO gets 1, 2, 3, 4, 5 — completely independent
+        coldFlux.subscribe(val -> System.out.println("Subscriber 2: " + val));
+
+        // HTTP calls are cold — each subscription triggers a NEW HTTP request
+        Flux<Product> productFlux = Flux.defer(() ->
+            Flux.fromIterable(productRepository.findAll())  // DB query runs per subscription
+        );
+    }
+}
+```
+
+### 9.2 Hot Publishers — Shared Stream, Subscribers Get Only Future Events
+
+A **hot** publisher is like a live TV broadcast: subscribers only receive events that occur AFTER they subscribe.
+
+```java
+package com.example.ecommerce.reactive;
+
+import reactor.core.publisher.ConnectableFlux;
+import reactor.core.publisher.Flux;
+import java.time.Duration;
+
+public class HotPublisherExample {
+
+    public void demonstrateHot() {
+        // publish() converts a cold Flux into a ConnectableFlux (hot, but not yet running)
+        ConnectableFlux<Long> hotFlux = Flux.interval(Duration.ofSeconds(1))
+            .publish();  // does NOT start emitting yet
+
+        // connect() starts the upstream source — emissions begin NOW
+        // Any subscriber that subscribes AFTER connect() misses earlier elements
+        hotFlux.connect();
+
+        // Subscriber A joins at t=0, receives 0, 1, 2, 3, ...
+        hotFlux.subscribe(val -> System.out.println("Sub A: " + val));
+
+        Thread.sleep(2500);  // 2.5 seconds pass — values 0, 1, 2 emitted
+
+        // Subscriber B joins at t=2.5s — only receives 2, 3, 4, ... (misses 0 and 1)
+        hotFlux.subscribe(val -> System.out.println("Sub B: " + val));
+    }
+}
+```
+
+### 9.3 autoConnect() and refCount()
+
+```java
+package com.example.ecommerce.reactive;
+
+import reactor.core.publisher.Flux;
+
+public class ConnectableFluxExample {
+
+    public void demonstrateAutoConnect() {
+        // autoConnect(2): automatically connects when 2 subscribers have subscribed
+        // No need to manually call connect()
+        Flux<Long> shared = Flux.interval(Duration.ofMillis(500))
+            .publish()
+            .autoConnect(2);  // upstream starts when 2nd subscriber subscribes
+
+        shared.subscribe(v -> System.out.println("Sub 1: " + v));
+        // Stream hasn't started yet — waiting for 2nd subscriber
+
+        shared.subscribe(v -> System.out.println("Sub 2: " + v));
+        // Now both subscribers are connected — upstream starts emitting
+    }
+
+    public void demonstrateRefCount() {
+        // refCount() is like autoConnect(1) BUT also disconnects when all subscribers cancel
+        // This is the foundation of Flux.share()
+        Flux<Long> refCounted = Flux.interval(Duration.ofMillis(500))
+            .publish()
+            .refCount(1);  // starts when 1 subscriber connects, STOPS when all unsubscribe
+
+        // Flux.share() = publish().refCount(1) — the most common multicast operator
+        Flux<Long> sharedFlux = Flux.interval(Duration.ofMillis(500)).share();
+    }
+}
+```
+
+> [!NOTE]
+> `Flux.share()` = `.publish().refCount(1)`. It automatically starts when the first subscriber connects and stops when the last subscriber cancels. Use it to avoid duplicate expensive operations (like database queries or HTTP calls) when multiple downstream operators consume the same source.
+
+---
+
+## 10. TestPublisher — Controlled Emission in Tests
+
+`TestPublisher` lets you programmatically control when elements, errors, and completion signals are emitted. It's ideal for testing operators that react to specific signal sequences.
+
+```java
+package com.example.ecommerce.reactive;
+
+import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
+import reactor.test.StepVerifier;
+import reactor.test.publisher.TestPublisher;
+
+class InventoryStreamProcessorTest {
+
+    @Test
+    void inventoryProcessor_completesWhenSourceCompletes() {
+        // TestPublisher.create() gives you full control over emissions
+        TestPublisher<InventoryUpdate> testPublisher = TestPublisher.create();
+
+        // The processor under test subscribes to the testPublisher's Flux
+        Flux<AlertEvent> alertStream = inventoryProcessor.processUpdates(testPublisher.flux());
+
+        StepVerifier.create(alertStream)
+            // Trigger emissions from the TestPublisher during verification
+            .then(() -> testPublisher.next(new InventoryUpdate("PROD-1", 5)))   // emit first update
+            .expectNextMatches(alert -> alert.getProductId().equals("PROD-1"))
+            .then(() -> testPublisher.next(new InventoryUpdate("PROD-1", 0)))   // emit low-stock update
+            .expectNextMatches(alert -> alert.getSeverity() == AlertSeverity.LOW_STOCK)
+            .then(testPublisher::complete)  // signal completion
+            .verifyComplete();
+    }
+
+    @Test
+    void inventoryProcessor_propagatesError() {
+        TestPublisher<InventoryUpdate> testPublisher = TestPublisher.create();
+
+        Flux<AlertEvent> alertStream = inventoryProcessor.processUpdates(testPublisher.flux());
+
+        StepVerifier.create(alertStream)
+            .then(() -> testPublisher.next(new InventoryUpdate("PROD-1", 5)))
+            .expectNextCount(1)
+            .then(() -> testPublisher.error(new RuntimeException("Upstream failure")))
+            .expectErrorMessage("Upstream failure")
+            .verify();
+    }
+}
+```
+
+---
+
+## 11. publishOn() vs subscribeOn()
+
+These two operators control **which thread** executes which part of a reactive pipeline. They are frequently misunderstood and misused.
+
+```java
+package com.example.ecommerce.reactive;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+public class ThreadSchedulingExample {
+
+    public void demonstratePublishOn() {
+        // publishOn() changes the thread for DOWNSTREAM operators (after publishOn)
+        Flux.just("A", "B", "C")
+            .map(s -> {
+                System.out.println("map 1 on: " + Thread.currentThread().getName()); // main thread
+                return s.toLowerCase();
+            })
+            .publishOn(Schedulers.boundedElastic())  // switch thread HERE
+            .map(s -> {
+                System.out.println("map 2 on: " + Thread.currentThread().getName()); // boundedElastic thread
+                return s + "!";
+            })
+            .subscribe(s -> System.out.println("received: " + s + " on: " + Thread.currentThread().getName()));
+        // Output: map 1 on: main, map 2 on: boundedElastic-1
+    }
+
+    public void demonstrateSubscribeOn() {
+        // subscribeOn() changes the thread for UPSTREAM operators (the source)
+        // It doesn't matter WHERE in the chain you put subscribeOn — it affects the source
+        Flux.just("A", "B", "C")
+            .map(s -> {
+                System.out.println("map 1 on: " + Thread.currentThread().getName()); // boundedElastic
+                return s.toLowerCase();
+            })
+            .map(s -> {
+                System.out.println("map 2 on: " + Thread.currentThread().getName()); // boundedElastic
+                return s + "!";
+            })
+            .subscribeOn(Schedulers.boundedElastic())  // affects the ENTIRE upstream
+            .subscribe();
+        // All operators run on boundedElastic regardless of where subscribeOn is placed
+    }
+
+    // PRACTICAL PATTERN: wrapping blocking I/O in reactive
+    public Mono<User> fetchUserFromLegacySystem(String userId) {
+        return Mono.fromCallable(() -> {
+                // This is a BLOCKING call (old JDBC, legacy API, etc.)
+                return legacyUserRepository.findById(userId);  // blocks the thread
+            })
+            // subscribeOn(boundedElastic): run the blocking call on a thread pool
+            // designed for blocking I/O (elastic = grows as needed, bounded = has a cap)
+            // This frees the Netty event loop thread to handle other requests
+            .subscribeOn(Schedulers.boundedElastic());
+    }
+}
+```
+
+### Scheduler Types Reference
+
+| Scheduler | Use Case | Thread Count |
+|-----------|----------|-------------|
+| `Schedulers.parallel()` | CPU-intensive, non-blocking work | `Runtime.availableProcessors()` |
+| `Schedulers.boundedElastic()` | Blocking I/O (DB calls, file I/O) | 10x CPU count, max 100,000 queued tasks |
+| `Schedulers.single()` | Single-threaded, ordered processing | 1 |
+| `Schedulers.immediate()` | No scheduling (run on current thread) | Caller's thread |
+| `Schedulers.fromExecutor(exec)` | Custom thread pool | Configurable |
+
+> [!CAUTION]
+> Never block on the event loop thread (the default thread in a reactive pipeline). Operations like `Thread.sleep()`, blocking JDBC calls, or `.block()` inside a reactive chain will starve the event loop and cause the entire server to freeze. Always use `subscribeOn(Schedulers.boundedElastic())` to offload blocking work.
+
+---
+
+## 12. Error Handling Patterns
+
+Reactive error handling operators provide composable fallback strategies:
+
+```java
+package com.example.ecommerce.service;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
+import java.time.Duration;
+
+public class ReactivePricingService {
+
+    // =============================================
+    // onErrorReturn — static fallback value
+    // =============================================
+    public Mono<Price> getPriceWithFallback(String productId) {
+        return pricingRepository.findByProductId(productId)
+            // If the DB is unavailable, return a default price instead of propagating the error
+            .onErrorReturn(DataAccessException.class, Price.defaultPrice(productId));
+    }
+
+    // =============================================
+    // onErrorResume — fallback publisher
+    // =============================================
+    public Mono<Price> getPriceWithCacheFallback(String productId) {
+        return pricingRepository.findByProductId(productId)
+            // If primary DB fails, fall back to the cache (another Mono)
+            .onErrorResume(DataAccessException.class,
+                ex -> priceCache.get(productId)   // try the cache
+                    .switchIfEmpty(Mono.error(ex)) // propagate original error if cache also misses
+            );
+    }
+
+    // =============================================
+    // onErrorMap — transform exception type
+    // =============================================
+    public Mono<Price> getPriceOrThrowBusinessException(String productId) {
+        return pricingRepository.findByProductId(productId)
+            // Transform infrastructure exceptions into business exceptions
+            // so the web layer doesn't leak database error details
+            .onErrorMap(DataAccessException.class,
+                ex -> new PricingServiceException("Failed to retrieve price", ex));
+    }
+
+    // =============================================
+    // retry() — simple fixed retry
+    // =============================================
+    public Flux<InventoryUpdate> streamInventory() {
+        return inventoryService.stream()
+            .retry(3);  // retry up to 3 times on ANY error (use carefully — can cause thundering herd)
+    }
+
+    // =============================================
+    // retryWhen() — exponential backoff with jitter
+    // =============================================
+    public Mono<OrderConfirmation> submitOrderWithRetry(OrderRequest request) {
+        return orderGateway.submit(request)
+            .retryWhen(
+                Retry.backoff(3, Duration.ofMillis(500))  // start with 500ms delay
+                    .maxBackoff(Duration.ofSeconds(10))    // cap at 10 seconds
+                    .jitter(0.5)                           // add 50% random jitter to prevent thundering herd
+                    .filter(ex -> ex instanceof TransientException)  // only retry transient errors
+                    .onRetryExhaustedThrow((spec, signal) ->         // custom exception after all retries fail
+                        new OrderSubmissionFailedException("Order submission failed after retries", signal.failure()))
+            );
+    }
+}
+```
+
+---
+
+## 13. Backpressure Strategies
+
+Backpressure is what prevents a fast producer from overwhelming a slow consumer in reactive streams:
+
+```java
+package com.example.ecommerce.reactive;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
+
+public class BackpressureExample {
+
+    // =============================================
+    // onBackpressureBuffer — queue elements
+    // =============================================
+    public Flux<SensorReading> bufferedSensorStream() {
+        return sensorHardware.readingsFlux()
+            // Buffer up to 1000 elements; if buffer fills, apply DROP_OLDEST strategy
+            .onBackpressureBuffer(
+                1000,                                    // max buffer size
+                dropped -> log.warn("Dropped reading: {}", dropped),  // callback on drop
+                BufferOverflowStrategy.DROP_OLDEST       // drop oldest when full
+            );
+    }
+
+    // =============================================
+    // onBackpressureDrop — silently drop excess elements
+    // =============================================
+    public Flux<LogEntry> sampledLogStream() {
+        return logProducer.stream()
+            // If the downstream is slow, simply drop excess log entries
+            // Appropriate for metrics/monitoring where losing some data is acceptable
+            .onBackpressureDrop(dropped -> droppedLogsCounter.increment());
+    }
+
+    // =============================================
+    // onBackpressureLatest — keep only the most recent element
+    // =============================================
+    public Flux<StockPrice> latestPriceStream() {
+        return stockFeed.stream()
+            // Only the latest price matters — if downstream is busy, skip intermediate prices
+            .onBackpressureLatest();
+    }
+
+    // =============================================
+    // limitRate — cooperative scheduling
+    // =============================================
+    public Flux<Product> paginatedProductStream() {
+        return productRepository.findAllAsFlux()
+            // limitRate(32) tells the upstream to fetch at most 32 elements at a time
+            // This avoids fetching millions of records into memory at once
+            .limitRate(32);  // upstream fetches 32, then 24 (75% refill threshold), then 24...
+    }
+}
+```
+
+---
+
+## 14. ParallelFlux — CPU-Bound Parallel Processing
+
+```java
+package com.example.ecommerce.service;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.ParallelFlux;
+import reactor.core.scheduler.Schedulers;
+
+public class ImageProcessingService {
+
+    public Flux<ProcessedImage> processImages(List<String> imageUrls) {
+        return Flux.fromIterable(imageUrls)
+            // parallel(4) splits the stream into 4 "rails" for parallel processing
+            .parallel(4)
+            // runOn() specifies which Scheduler to use for each rail
+            // Schedulers.parallel() uses a thread pool sized to CPU core count
+            .runOn(Schedulers.parallel())
+            .map(url -> {
+                // This map() runs in parallel across 4 threads simultaneously
+                // Each rail processes its assigned subset of URLs
+                byte[] raw = downloadImage(url);         // blocking download (bad practice here — for demo only)
+                return imageProcessor.compress(raw);      // CPU-intensive operation
+            })
+            .filter(ProcessedImage::isValid)
+            // sequential() merges the 4 rails back into a single sequential Flux
+            // Order is NOT guaranteed — elements arrive in completion order
+            .sequential();
+    }
+
+    // ParallelFlux with error handling per rail
+    public Flux<Report> generateReportsInParallel(List<ReportRequest> requests) {
+        return Flux.fromIterable(requests)
+            .parallel()  // default: one rail per CPU core
+            .runOn(Schedulers.boundedElastic())  // boundedElastic for I/O-bound work
+            .flatMap(request ->
+                Mono.fromCallable(() -> reportEngine.generate(request))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .onErrorResume(ex -> {
+                        log.error("Failed to generate report {}", request.getId(), ex);
+                        return Mono.empty();  // skip failed reports, continue processing others
+                    })
+            )
+            .sequential();
+    }
+}
+```
+
+---
+
+## 15. Reactive Security
+
+Spring Security provides first-class reactive support through its `spring-security-webflux` module:
+
+```java
+package com.example.ecommerce.security;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
+import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.core.userdetails.ReactiveUserDetailsService;
+import org.springframework.security.authentication.ReactiveAuthenticationManager;
+
+@Configuration
+@EnableReactiveMethodSecurity  // enables @PreAuthorize on reactive controller methods
+public class ReactiveSecurityConfig {
+
+    @Bean
+    public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+        return http
+            // ServerHttpSecurity is the reactive equivalent of HttpSecurity
+            .csrf(csrf -> csrf.disable())  // disable CSRF for stateless REST APIs
+            .authorizeExchange(exchanges -> exchanges
+                .pathMatchers("/actuator/health/**").permitAll()
+                .pathMatchers("/api/public/**").permitAll()
+                .pathMatchers("/api/admin/**").hasRole("ADMIN")
+                .anyExchange().authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtConverter()))
+            )
+            .build();
+    }
+
+    // ReactiveUserDetailsService: reactive equivalent of UserDetailsService
+    @Bean
+    public ReactiveUserDetailsService userDetailsService() {
+        return username ->
+            // Returns Mono<UserDetails> — non-blocking lookup
+            userRepository.findByUsername(username)
+                .map(user -> org.springframework.security.core.userdetails.User
+                    .withUsername(user.getUsername())
+                    .password(user.getPasswordHash())
+                    .roles(user.getRoles().toArray(String[]::new))
+                    .build()
+                );
+    }
+}
+```
+
+```java
+package com.example.ecommerce.web;
+
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+@RestController
+@RequestMapping("/api/orders")
+public class ReactiveOrderController {
+
+    // @PreAuthorize works in reactive context with @EnableReactiveMethodSecurity
+    // Spring evaluates this AFTER the SecurityContext is populated (non-blocking)
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @GetMapping
+    public Flux<OrderDto> getMyOrders(
+            @AuthenticationPrincipal Jwt jwt) {  // inject the JWT token
+        String userId = jwt.getSubject();
+        return orderService.findByCustomerId(userId);
+    }
+
+    // Manual SecurityContext access in reactive pipeline
+    @GetMapping("/admin/all")
+    public Flux<OrderDto> getAllOrders() {
+        return ReactiveSecurityContextHolder.getContext()
+            .map(ctx -> ctx.getAuthentication().getName())
+            .flatMapMany(adminName -> {
+                log.info("Admin {} is listing all orders", adminName);
+                return orderService.findAll();
+            });
+    }
+}
+```
+
+---
+
+## 16. Flux.create() with FluxSink — Bridging Callback APIs
+
+`Flux.create()` is the escape hatch for integrating non-reactive (callback/listener-based) APIs into the reactive pipeline:
+
+```java
+package com.example.ecommerce.reactive;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
+
+public class WebSocketMessageBridge {
+
+    // Bridges a WebSocket session's onMessage callbacks to a reactive Flux
+    public Flux<String> streamMessages(WebSocketSession session) {
+        return Flux.create(sink -> {
+            // sink gives you .next(), .complete(), and .error() methods
+            // Call these in response to external events
+
+            // Register our reactive bridge as the WebSocket message handler
+            session.setMessageHandler(message -> {
+                if (sink.isCancelled()) {
+                    // If the subscriber has cancelled (e.g., client disconnected),
+                    // stop feeding elements — prevents memory leaks
+                    session.close();
+                    return;
+                }
+                sink.next(message.getPayload());  // push message into the Flux
+            });
+
+            session.setErrorHandler(error -> sink.error(error));  // propagate errors
+            session.setCloseHandler(() -> sink.complete());        // signal completion on close
+
+            // SinkDisposable: cleanup when subscriber cancels (e.g., HTTP client disconnects)
+            sink.onCancel(() -> {
+                log.info("Subscriber cancelled — closing WebSocket session");
+                session.close();
+            });
+
+            // FluxSink.OverflowStrategy.BUFFER: buffer excess elements if subscriber is slow
+            // Other options: DROP, LATEST, ERROR, IGNORE
+        }, FluxSink.OverflowStrategy.BUFFER);
+    }
+}
+```
+
+---
+
+## 17. @Tailable for MongoDB Reactive Streaming
+
+MongoDB supports **tailable cursors** on capped collections — a cursor that never closes, delivering new documents as they are inserted in real-time:
+
+```java
+package com.example.ecommerce.repository;
+
+import org.springframework.data.mongodb.repository.ReactiveMongoRepository;
+import org.springframework.data.mongodb.repository.Tailable;
+import org.springframework.data.mongodb.repository.Query;
+import reactor.core.publisher.Flux;
+
+public interface OrderEventRepository extends ReactiveMongoRepository<OrderEvent, String> {
+
+    // @Tailable creates an infinite, non-closing cursor on a capped collection
+    // Returns a Flux that NEVER completes — it emits new events as they are inserted
+    // The collection MUST be a capped collection (fixed-size, circular buffer)
+    @Tailable
+    Flux<OrderEvent> findByOrderId(String orderId);
+
+    // Stream ALL new events across all orders — real-time event feed
+    @Tailable
+    @Query("{}")  // match all documents
+    Flux<OrderEvent> streamAllEvents();
+
+    // Stream only high-priority events
+    @Tailable
+    @Query("{ priority: { $gte: ?0 } }")
+    Flux<OrderEvent> streamEventsByMinPriority(int minPriority);
+}
+```
+
+```java
+package com.example.ecommerce.service;
+
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+
+@Service
+public class RealTimeOrderEventService {
+
+    private final OrderEventRepository repository;
+
+    public RealTimeOrderEventService(OrderEventRepository repository) {
+        this.repository = repository;
+    }
+
+    // This Flux is infinite — it emits events as they arrive from MongoDB
+    // Downstream can subscribe and receive real-time notifications
+    public Flux<OrderEvent> streamOrderUpdates(String orderId) {
+        return repository.findByOrderId(orderId)
+            .filter(event -> event.isSignificant())     // filter noise
+            .map(event -> enrichWithMetadata(event))    // add computed fields
+            .onErrorResume(ex -> {
+                log.error("MongoDB tailable cursor error", ex);
+                // On error, reconnect after 1 second (tailable cursors can disconnect)
+                return Flux.defer(() -> streamOrderUpdates(orderId))
+                    .delaySubscription(Duration.ofSeconds(1));
+            });
+    }
+
+    // Expose as Server-Sent Events from a WebFlux controller
+    // GET /orders/{orderId}/stream — streams events as SSE
+    public Flux<ServerSentEvent<OrderEvent>> streamAsSSE(String orderId) {
+        return streamOrderUpdates(orderId)
+            .map(event -> ServerSentEvent.<OrderEvent>builder()
+                .id(event.getId())
+                .event(event.getType().name())
+                .data(event)
+                .build()
+            );
+    }
+}
+```
+
+> [!IMPORTANT]
+> Tailable cursors require the MongoDB collection to be **capped**. Create it with:
+> ```javascript
+> db.createCollection("orderEvents", { capped: true, size: 104857600, max: 100000 })
+> // size: 100MB max, max: 100,000 documents
+> ```
+> When the collection is full, oldest documents are automatically overwritten.
+
+---
+
+## 18. Reactive Testing — Complete StepVerifier Guide
+
+```java
+package com.example.ecommerce.reactive;
+
+import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
+import reactor.test.publisher.TestPublisher;
+import java.time.Duration;
+
+class CompleteStepVerifierGuideTest {
+
+    @Test
+    void expectSubscription_thenElements_thenComplete() {
+        StepVerifier.create(Flux.just("a", "b", "c"))
+            .expectSubscription()     // first always comes the subscription signal
+            .expectNext("a")          // exact value match
+            .expectNext("b", "c")    // multiple exact matches in one call
+            .expectComplete()         // stream completes without error
+            .verify();                // MUST call — this actually subscribes and runs
+    }
+
+    @Test
+    void expectNextMatches_forPredicateBasedAssertion() {
+        StepVerifier.create(orderService.findRecentOrders())
+            .expectNextMatches(order -> order.getStatus() == OrderStatus.PENDING)  // predicate
+            .expectNextMatches(order -> order.getTotalCents() > 1000)
+            .verifyComplete();  // combines expectComplete() + verify()
+    }
+
+    @Test
+    void assertNext_forComplexObjectAssertion() {
+        StepVerifier.create(productService.findById("PROD-42"))
+            .assertNext(product -> {
+                // Use AssertJ assertions inside assertNext for rich error messages
+                assertThat(product.getId()).isEqualTo("PROD-42");
+                assertThat(product.getName()).isNotBlank();
+                assertThat(product.getPriceCents()).isPositive();
+            })
+            .verifyComplete();
+    }
+
+    @Test
+    void expectError_withExactExceptionType() {
+        StepVerifier.create(orderService.findById("NON-EXISTENT"))
+            .expectError(OrderNotFoundException.class)  // exact type check
+            .verify();
+    }
+
+    @Test
+    void verifyError_withPredicate() {
+        StepVerifier.create(paymentService.charge(invalidRequest))
+            .verifyErrorMatches(ex ->
+                ex instanceof PaymentException &&
+                ex.getMessage().contains("insufficient funds")
+            );
+    }
+
+    @Test
+    void virtualTime_forTimedStreams() {
+        // withVirtualTime() MUST receive a Supplier — the Flux must be created lazily
+        StepVerifier.withVirtualTime(() ->
+                Flux.interval(Duration.ofHours(1)).take(3)
+            )
+            .expectSubscription()
+            .expectNoEvent(Duration.ofMinutes(59))  // assert nothing emitted before 59 minutes
+            .thenAwait(Duration.ofMinutes(1))        // advance clock by 1 minute (total: 60 min)
+            .expectNext(0L)                          // first tick
+            .thenAwait(Duration.ofHours(1))          // advance 1 hour
+            .expectNext(1L)                          // second tick
+            .thenAwait(Duration.ofHours(1))          // advance 1 hour
+            .expectNext(2L)                          // third tick
+            .verifyComplete();
+    }
+}
+```
